@@ -77,6 +77,24 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .map(|s| (s.x, s.y))
         .collect();
 
+    let planet_positions: Vec<(&str, &str, f64, f64, ratatui::style::Color)> = app
+        .planets
+        .iter()
+        .map(|p| {
+            let color = match p.name {
+                "Mercury" => Color::Gray,
+                "Venus" => Color::Yellow,
+                "Mars" => Color::Red,
+                "Jupiter" => Color::White,
+                "Saturn" => Color::Yellow,
+                "Uranus" => Color::Cyan,
+                "Neptune" => Color::Blue,
+                _ => Color::White,
+            };
+            (p.name, p.symbol, p.x, p.y, color)
+        })
+        .collect();
+
     let sun_pos = app.sun_moon.sun_stereo.as_ref().map(|p| {
         let c = CartesianCoordinates::from(p);
         (c.x, c.y)
@@ -152,6 +170,14 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 );
                 ctx.print(mx + 0.12, my + 0.12, format!("{phase_pct:.0}%"));
             }
+
+            for (_name, symbol, x, y, color) in &planet_positions {
+                ctx.print(
+                    *x,
+                    *y,
+                    Line::from(Span::styled(*symbol, Style::default().fg(*color))),
+                );
+            }
         });
 
     f.render_widget(canvas, area);
@@ -169,7 +195,7 @@ fn render_info_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let phase_pct =
         (1.0 - app.sun_moon.moon_phase_angle.to_radians().cos()) / 2.0 * 100.0;
 
-    let text = vec![
+    let mut text = vec![
         Line::from(Span::styled(" Sky Info", Style::default().add_modifier(Modifier::BOLD))),
         Line::from(""),
         Line::from(format!(" Stars: {}", app.stars.len())),
@@ -182,7 +208,29 @@ fn render_info_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Line::from(format!("  {moon_status}")),
         Line::from(format!("  Phase: {phase_pct:.0}%")),
         Line::from(format!("  Angle: {:.1}°", app.sun_moon.moon_phase_angle)),
+        Line::from(""),
+        Line::from(Span::styled(" Planets", Style::default().add_modifier(Modifier::BOLD))),
     ];
+    if app.planets.is_empty() {
+        text.push(Line::from("  none above horizon"));
+    } else {
+        for p in &app.planets {
+            let color = match p.name {
+                "Mercury" => Color::Gray,
+                "Venus" => Color::Yellow,
+                "Mars" => Color::Red,
+                "Jupiter" => Color::White,
+                "Saturn" => Color::Yellow,
+                "Uranus" => Color::Cyan,
+                "Neptune" => Color::Blue,
+                _ => Color::White,
+            };
+            text.push(Line::from(Span::styled(
+                format!("  {} {} ({:.1})", p.symbol, p.name, p.mag),
+                Style::default().fg(color),
+            )));
+        }
+    }
 
     let para = Paragraph::new(text).block(Block::default().borders(Borders::ALL).title(" Info "));
     f.render_widget(para, area);

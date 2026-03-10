@@ -56,6 +56,7 @@ fn render_planetarium(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 }
 
 fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let test_mode = app.test_mode;
     // Pre-compute star coordinate groups before the closure
     let bright: Vec<(f64, f64)> = app
         .stars
@@ -87,11 +88,17 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let phase_angle = app.sun_moon.moon_phase_angle;
     let phase_pct = (1.0 - phase_angle.to_radians().cos()) / 2.0 * 100.0;
 
+    let canvas_title = if test_mode {
+        " Sky View (horizon circle, N=bottom) [ORION ONLY] "
+    } else {
+        " Sky View (horizon circle, N=bottom) "
+    };
+
     let canvas = Canvas::default()
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Sky View (horizon circle, N=bottom) "),
+                .title(canvas_title),
         )
         .x_bounds([-2.2, 2.2])
         .y_bounds([-2.2, 2.2])
@@ -126,8 +133,8 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             // Cardinal labels (N=bottom due to canvas_orient convention)
             ctx.print(0.0, -2.15, "N");
             ctx.print(0.0, 2.15, "S");
-            ctx.print(-2.15, 0.0, "E");
-            ctx.print(2.15, 0.0, "W");
+            ctx.print(2.15, 0.0, "E");
+            ctx.print(-2.15, 0.0, "W");
 
             if let Some((sx, sy)) = sun_pos {
                 ctx.print(
@@ -293,7 +300,7 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         editing_hint
     };
 
-    let line2 = " [L]lat [O]lon [T]time [Space]live [+/-]mag [R]weather [P/W]tab [Q]quit";
+    let line2 = " [L]lat [O]lon [T]time [Space]live [+/-]mag [D]orion [R]weather [P/W]tab [Q]quit";
 
     let text = vec![Line::from(line1), Line::from(line2)];
     let para =

@@ -349,13 +349,13 @@ impl Mul<f64> for PolarCoordinates {
 
 impl PolarCoordinates {
     pub fn mut_canvas_orient(self: &mut Self) {
-        self.phi = -self.phi - 90.0;
+        self.phi = self.phi - 90.0;
     }
 
     pub fn canvas_orient(self: Self) -> Self {
         Self {
             rad: self.rad,
-            phi: -self.phi - 90.0,
+            phi: self.phi - 90.0,
         }
     }
 

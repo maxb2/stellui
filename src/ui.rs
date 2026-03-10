@@ -10,7 +10,7 @@ use ratatui::{
 };
 
 use crate::app::{App, InputMode, Tab};
-use planetuium::astro::CartesianCoordinates;
+use stellui::astro::CartesianCoordinates;
 
 pub fn render(f: &mut Frame, app: &App) {
     let chunks = Layout::vertical([
@@ -23,7 +23,7 @@ pub fn render(f: &mut Frame, app: &App) {
     render_tabs(f, app, chunks[0]);
 
     match app.tab {
-        Tab::Planetarium => render_planetarium(f, app, chunks[1]),
+        Tab::Sky => render_sky(f, app, chunks[1]),
         Tab::Weather => render_weather(f, app, chunks[1]),
     }
 
@@ -32,22 +32,22 @@ pub fn render(f: &mut Frame, app: &App) {
 
 fn render_tabs(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let selected = match app.tab {
-        Tab::Planetarium => 0,
+        Tab::Sky => 0,
         Tab::Weather => 1,
     };
-    let tabs = Tabs::new(vec!["[P] Planetarium", "[W] Weather"])
+    let tabs = Tabs::new(vec!["[S] Sky", "[W] Weather"])
         .select(selected)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Planetuium "),
+                .title(" Stellui "),
         )
         .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
         .divider("|");
     f.render_widget(tabs, area);
 }
 
-fn render_planetarium(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+fn render_sky(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let cols = Layout::horizontal([Constraint::Percentage(80), Constraint::Percentage(20)])
         .split(area);
 
@@ -300,7 +300,7 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         editing_hint
     };
 
-    let line2 = " [L]lat [O]lon [T]time [Space]live [+/-]mag [D]orion [R]weather [P/W]tab [Q]quit";
+    let line2 = " [L]lat [O]lon [T]time [Space]live [+/-]mag [D]orion [R]weather [S/W]tab [Q]quit";
 
     let text = vec![Line::from(line1), Line::from(line2)];
     let para =

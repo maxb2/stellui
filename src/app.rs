@@ -1,10 +1,10 @@
 use chrono::{DateTime, Utc};
 
-use crate::planetarium::{self, RenderedStar, SunMoonInfo};
+use crate::sky::{self, RenderedStar, SunMoonInfo};
 use crate::weather::HourlyForecast;
 
 pub enum Tab {
-    Planetarium,
+    Sky,
     Weather,
 }
 
@@ -40,7 +40,7 @@ pub struct App {
 impl App {
     pub fn new(lat: f64, lon: f64, height: f64) -> Self {
         let mut app = Self {
-            tab: Tab::Planetarium,
+            tab: Tab::Sky,
             input_mode: InputMode::Normal,
             lat,
             lon,
@@ -66,7 +66,7 @@ impl App {
     }
 
     pub fn recompute(&mut self) {
-        self.stars = planetarium::compute_stars(
+        self.stars = sky::compute_stars(
             self.lat,
             self.lon,
             self.height,
@@ -75,6 +75,6 @@ impl App {
             self.test_mode,
         );
         self.sun_moon =
-            planetarium::compute_sun_moon(self.lat, self.lon, self.height, self.datetime);
+            sky::compute_sun_moon(self.lat, self.lon, self.height, self.datetime);
     }
 }

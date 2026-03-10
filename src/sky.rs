@@ -1,10 +1,10 @@
 use astronomy_engine_bindings::astro_observer_t;
 use chrono::{DateTime, Utc};
-use planetuium::astro::{
+use stellui::astro::{
     astro_time_from_datetime, hor_to_stereo, star_stereo, CartesianCoordinates, PolarCoordinates,
     SunMoonProjection,
 };
-use planetuium::catalog;
+use stellui::catalog;
 
 pub struct RenderedStar {
     pub x: f64,

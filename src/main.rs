@@ -1,5 +1,5 @@
 mod app;
-mod planetarium;
+mod sky;
 mod ui;
 mod weather;
 
@@ -120,8 +120,8 @@ fn run(
                 match app.input_mode {
                     InputMode::Normal => match key.code {
                         KeyCode::Char('q') | KeyCode::Char('Q') => break,
-                        KeyCode::Char('p') | KeyCode::Char('P') => {
-                            app.tab = Tab::Planetarium;
+                        KeyCode::Char('s') | KeyCode::Char('S') => {
+                            app.tab = Tab::Sky;
                         }
                         KeyCode::Char('w') | KeyCode::Char('W') => {
                             app.tab = Tab::Weather;

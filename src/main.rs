@@ -37,8 +37,8 @@ fn main() -> Result<()> {
 }
 
 fn parse_args(args: &[String]) -> (f64, f64, f64) {
-    let mut lat = 38.93;
-    let mut lon = -92.36;
+    let mut lat = 40.71;
+    let mut lon = -74.01;
     let mut height = 0.0;
     let mut i = 1;
     while i < args.len() {

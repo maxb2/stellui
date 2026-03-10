@@ -26,6 +26,8 @@ pub struct App {
     pub live_mode: bool,
     pub max_mag: f64,
 
+    pub test_mode: bool,
+
     pub stars: Vec<RenderedStar>,
     pub sun_moon: SunMoonInfo,
 
@@ -47,6 +49,7 @@ impl App {
             datetime: Utc::now(),
             live_mode: false,
             max_mag: 5.5,
+            test_mode: false,
             stars: Vec::new(),
             sun_moon: SunMoonInfo {
                 sun_stereo: None,
@@ -69,6 +72,7 @@ impl App {
             self.height,
             self.datetime,
             self.max_mag,
+            self.test_mode,
         );
         self.sun_moon =
             planetarium::compute_sun_moon(self.lat, self.lon, self.height, self.datetime);

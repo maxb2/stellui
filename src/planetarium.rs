@@ -24,6 +24,7 @@ pub fn compute_stars(
     height: f64,
     datetime: DateTime<Utc>,
     max_mag: f64,
+    orion_only: bool,
 ) -> Vec<RenderedStar> {
     let observer = astro_observer_t {
         latitude: lat,
@@ -34,6 +35,13 @@ pub fn compute_stars(
 
     catalog::J2000_CATALOG
         .iter()
+        .filter(|s| {
+            if orion_only {
+                s.ra >= 4.7 && s.ra <= 6.3 && s.dec >= -11.0 && s.dec <= 23.0
+            } else {
+                true
+            }
+        })
         .filter(|s| s.mag <= max_mag)
         .filter_map(|star| {
             let polar = star_stereo(star, &mut time, &observer, true, true).ok()?;

@@ -154,6 +154,10 @@ fn run(
                             app.max_mag = (app.max_mag - 0.5).max(0.0);
                             app.recompute();
                         }
+                        KeyCode::Char('d') | KeyCode::Char('D') => {
+                            app.test_mode = !app.test_mode;
+                            app.recompute();
+                        }
                         KeyCode::Char('r') | KeyCode::Char('R') => {
                             if !app.weather_loading {
                                 spawn_weather(&tx, app.lat, app.lon);

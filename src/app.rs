@@ -1,7 +1,39 @@
+use std::time::Instant;
+
 use chrono::{DateTime, Utc};
 
 use crate::sky::{self, OrreryInfo, RenderedPlanet, RenderedStar, SunMoonInfo};
 use crate::weather::HourlyForecast;
+
+/// Sky tab: seconds → days. Default index 6 = 1x real-time.
+pub const SKY_SPEED_PRESETS: &[(i64, &str)] = &[
+    (-86400,  "-1d/s"),
+    (-3600,   "-1h/s"),
+    (-600,    "-10m/s"),
+    (-60,     "-1m/s"),
+    (-10,     "-10x"),
+    (-1,      "-1x"),
+    (1,       "1x"),     // index 6 — default
+    (10,      "10x"),
+    (60,      "1m/s"),
+    (600,     "10m/s"),
+    (3600,    "1h/s"),
+    (86400,   "1d/s"),
+];
+
+/// Orrery tab: days → decades. Default index 5 = 1d/s.
+pub const ORRERY_SPEED_PRESETS: &[(i64, &str)] = &[
+    (-86400 * 365 * 10, "-10y/s"),
+    (-86400 * 365,      "-1y/s"),
+    (-86400 * 30,       "-1mo/s"),
+    (-86400 * 7,        "-1w/s"),
+    (-86400,            "-1d/s"),
+    (86400,             "1d/s"),   // index 5 — default
+    (86400 * 7,         "1w/s"),
+    (86400 * 30,        "1mo/s"),
+    (86400 * 365,       "1y/s"),
+    (86400 * 365 * 10,  "10y/s"),
+];
 
 pub enum Tab {
     Sky,
@@ -25,6 +57,10 @@ pub struct App {
     pub input_buf: String,
     pub datetime: DateTime<Utc>,
     pub live_mode: bool,
+    pub sky_speed_index: usize,
+    pub orrery_speed_index: usize,
+    pub time_paused: bool,
+    pub last_tick: Instant,
     pub max_mag: f64,
 
     pub test_mode: bool,
@@ -51,6 +87,10 @@ impl App {
             input_buf: String::new(),
             datetime: Utc::now(),
             live_mode: false,
+            sky_speed_index: 6,
+            orrery_speed_index: 5,
+            time_paused: false,
+            last_tick: Instant::now(),
             max_mag: 5.5,
             test_mode: false,
             stars: Vec::new(),

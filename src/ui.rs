@@ -9,7 +9,7 @@ use ratatui::{
     },
 };
 
-use crate::app::{App, InputMode, Tab};
+use crate::app::{App, InputMode, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab};
 use crate::sky;
 use stellui::astro::CartesianCoordinates;
 
@@ -441,7 +441,17 @@ fn render_orrery_info(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
 fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let dt_str = app.datetime.format("%Y-%m-%d %H:%M UTC").to_string();
-    let live_str = if app.live_mode { " [LIVE]" } else { "" };
+    let mode_str = if app.live_mode {
+        " [LIVE]".to_string()
+    } else if app.time_paused {
+        " [PAUSED]".to_string()
+    } else {
+        let label = match app.tab {
+            Tab::Sky | Tab::Weather => SKY_SPEED_PRESETS[app.sky_speed_index].1,
+            Tab::SolarSystem => ORRERY_SPEED_PRESETS[app.orrery_speed_index].1,
+        };
+        format!(" [{}]", label)
+    };
 
     let editing_hint = match app.input_mode {
         InputMode::Normal => String::new(),
@@ -453,7 +463,7 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let line1 = if editing_hint.is_empty() {
         format!(
             " Lat:{:.4} Lon:{:.4} {}{}",
-            app.lat, app.lon, dt_str, live_str
+            app.lat, app.lon, dt_str, mode_str
         )
     } else {
         editing_hint
@@ -461,11 +471,11 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let line2 = match app.tab {
         Tab::Sky =>
-            " [L]lat [O]lon [T]time [Space]live [+/-]mag [D]orion [S/W/P]tab [Q]quit",
+            " [L]lat [O]lon [T]time [N]now [Space]pause [,/.]speed [+/-]mag [D]orion [S/W/P]tab [Q]quit",
         Tab::Weather =>
             " [L]lat [O]lon [R]weather [↑/↓]scroll [S/W/P]tab [Q]quit",
         Tab::SolarSystem =>
-            " [L]lat [O]lon [T]time [Space]live [S/W/P]tab [Q]quit",
+            " [L]lat [O]lon [T]time [N]now [Space]pause [,/.]speed [S/W/P]tab [Q]quit",
     };
 
     let text = vec![Line::from(line1), Line::from(line2)];

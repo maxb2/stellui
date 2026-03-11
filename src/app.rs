@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 
-use crate::sky::{self, OrreryInfo, RenderedPlanet, RenderedStar, SunMoonInfo};
+use crate::sky::{self, AlmanacInfo, OrreryInfo, RenderedPlanet, RenderedStar, SunMoonInfo};
 use crate::weather::HourlyForecast;
 
 /// Sky tab: seconds → days. Default index 6 = 1x real-time.
@@ -39,6 +39,7 @@ pub enum Tab {
     Sky,
     Weather,
     SolarSystem,
+    Almanac,
 }
 
 pub enum InputMode {
@@ -69,6 +70,7 @@ pub struct App {
     pub sun_moon: SunMoonInfo,
     pub planets: Vec<RenderedPlanet>,
     pub orrery: OrreryInfo,
+    pub almanac: AlmanacInfo,
 
     pub forecasts: Option<Vec<HourlyForecast>>,
     pub weather_loading: bool,
@@ -96,6 +98,7 @@ impl App {
             stars: Vec::new(),
             planets: Vec::new(),
             orrery: OrreryInfo { planets: Vec::new() },
+            almanac: AlmanacInfo { tracks: Vec::new(), current_step: 0 },
             sun_moon: SunMoonInfo {
                 sun_stereo: None,
                 moon_stereo: None,
@@ -122,5 +125,8 @@ impl App {
         self.sun_moon = sky::compute_sun_moon(self.lat, self.lon, self.height, self.datetime);
         self.planets = sky::compute_planets(self.lat, self.lon, self.height, self.datetime);
         self.orrery = sky::compute_orrery(self.datetime);
+        if matches!(self.tab, Tab::Almanac) {
+            self.almanac = sky::compute_almanac(self.lat, self.lon, self.height, self.datetime);
+        }
     }
 }

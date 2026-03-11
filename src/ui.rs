@@ -459,7 +459,14 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         editing_hint
     };
 
-    let line2 = " [L]lat [O]lon [T]time [Space]live [+/-]mag [D]orion [R]weather [S/W/P]tab [Q]quit";
+    let line2 = match app.tab {
+        Tab::Sky =>
+            " [L]lat [O]lon [T]time [Space]live [+/-]mag [D]orion [S/W/P]tab [Q]quit",
+        Tab::Weather =>
+            " [L]lat [O]lon [R]weather [↑/↓]scroll [S/W/P]tab [Q]quit",
+        Tab::SolarSystem =>
+            " [L]lat [O]lon [T]time [Space]live [S/W/P]tab [Q]quit",
+    };
 
     let text = vec![Line::from(line1), Line::from(line2)];
     let para =

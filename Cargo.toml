@@ -1,7 +1,12 @@
 [package]
 name = "stellui"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
+description = "Terminal UI for stargazing — displays a live star chart with sun/moon positions and weather-based seeing quality forecasts"
+license = "MIT"
+repository = "https://github.com/maxb2/stellui"
+keywords = ["astronomy", "tui", "stargazing", "terminal", "ratatui"]
+categories = ["command-line-utilities", "science"]
 
 [dependencies]
 astronomy-engine-bindings = "2.1.19"

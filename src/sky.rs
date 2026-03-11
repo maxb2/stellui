@@ -232,8 +232,10 @@ pub struct AlmanacInfo {
     pub current_step: usize,
 }
 
+type BodySpec = (&'static str, &'static str, i32, (u8, u8, u8));
+
 pub fn compute_almanac(lat: f64, lon: f64, height: f64, datetime: DateTime<Utc>) -> AlmanacInfo {
-    const BODIES: &[(&str, &str, i32, (u8, u8, u8))] = &[
+    const BODIES: &[BodySpec] = &[
         ("Sun",     "☀",  astro_body_t_BODY_SUN,     (255, 220,  50)),
         ("Moon",    "☽",  astro_body_t_BODY_MOON,    (200, 200, 200)),
         ("Mercury", "☿",  astro_body_t_BODY_MERCURY, (180, 180, 180)),

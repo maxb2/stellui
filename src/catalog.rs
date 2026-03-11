@@ -1,11 +1,23 @@
+#![allow(clippy::approx_constant)]
+
+/// A single star entry from the J2000 catalog.
 #[derive(Debug)]
 pub struct Star {
+    /// Hipparcos catalogue number or internal identifier.
     pub id: u32,
-    pub ra: f64,  // hour
-    pub dec: f64, // degree
+    /// Right ascension in **hours** (0 ≤ ra < 24).
+    pub ra: f64,
+    /// Declination in **degrees** (−90 ≤ dec ≤ 90).
+    pub dec: f64,
+    /// Apparent visual magnitude (lower = brighter).
     pub mag: f64,
 }
 
+/// Compile-time star catalog in the J2000.0 epoch.
+///
+/// Contains 9 096 stars derived from the Hipparcos catalog.
+/// Fields use the same units as [`Star`]: RA in hours, Dec in degrees,
+/// magnitude as apparent visual magnitude.
 pub static J2000_CATALOG: [Star; 9096] = [
     Star {
         id: 1,
@@ -54584,3 +54596,37 @@ pub static J2000_CATALOG: [Star; 9096] = [
         mag: 5.8,
     },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catalog_len() {
+        assert_eq!(J2000_CATALOG.len(), 9096);
+    }
+
+    #[test]
+    fn catalog_ids_nonzero() {
+        assert!(J2000_CATALOG.iter().all(|s| s.id > 0));
+    }
+
+    #[test]
+    fn catalog_magnitudes_finite() {
+        assert!(J2000_CATALOG.iter().all(|s| s.mag.is_finite()));
+    }
+
+    #[test]
+    fn catalog_ra_in_hours_range() {
+        assert!(J2000_CATALOG.iter().all(|s| s.ra >= 0.0 && s.ra < 24.0));
+    }
+
+    #[test]
+    fn catalog_dec_in_degrees_range() {
+        assert!(
+            J2000_CATALOG
+                .iter()
+                .all(|s| s.dec >= -90.0 && s.dec <= 90.0)
+        );
+    }
+}

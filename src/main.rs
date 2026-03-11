@@ -61,11 +61,7 @@ fn parse_args(args: &[String]) -> (f64, f64, f64) {
     (lat, lon, height)
 }
 
-fn spawn_weather(
-    tx: &mpsc::Sender<Result<Vec<HourlyForecast>>>,
-    lat: f64,
-    lon: f64,
-) {
+fn spawn_weather(tx: &mpsc::Sender<Result<Vec<HourlyForecast>>>, lat: f64, lon: f64) {
     let tx = tx.clone();
     std::thread::spawn(move || {
         tx.send(weather::fetch_forecast(lat, lon)).ok();
@@ -108,80 +104,77 @@ fn run(
 
         terminal.draw(|f| ui::render(f, &app))?;
 
-        if event::poll(Duration::from_millis(16))? {
-            if let Event::Key(key) = event::read()? {
-                // Ctrl+C always quits
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && key.code == KeyCode::Char('c')
-                {
-                    break;
-                }
+        if event::poll(Duration::from_millis(16))?
+            && let Event::Key(key) = event::read()?
+        {
+            // Ctrl+C always quits
+            if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+                break;
+            }
 
-                match app.input_mode {
-                    InputMode::Normal => match key.code {
-                        KeyCode::Char('q') | KeyCode::Char('Q') => break,
-                        KeyCode::Char('s') | KeyCode::Char('S') => {
-                            app.tab = Tab::Sky;
-                        }
-                        KeyCode::Char('w') | KeyCode::Char('W') => {
-                            app.tab = Tab::Weather;
-                        }
-                        KeyCode::Char('l') | KeyCode::Char('L') => {
-                            app.input_mode = InputMode::EditingLat;
-                            app.input_buf = format!("{:.6}", app.lat);
-                        }
-                        KeyCode::Char('o') | KeyCode::Char('O') => {
-                            app.input_mode = InputMode::EditingLon;
-                            app.input_buf = format!("{:.6}", app.lon);
-                        }
-                        KeyCode::Char('t') | KeyCode::Char('T') => {
-                            app.input_mode = InputMode::EditingDatetime;
-                            app.input_buf =
-                                app.datetime.format("%Y-%m-%d %H:%M").to_string();
-                        }
-                        KeyCode::Char(' ') => {
-                            app.live_mode = !app.live_mode;
-                            if app.live_mode {
-                                app.datetime = Utc::now();
-                                app.recompute();
-                            }
-                        }
-                        KeyCode::Char('+') | KeyCode::Char('=') => {
-                            app.max_mag = (app.max_mag + 0.5).min(8.0);
+            match app.input_mode {
+                InputMode::Normal => match key.code {
+                    KeyCode::Char('q') | KeyCode::Char('Q') => break,
+                    KeyCode::Char('s') | KeyCode::Char('S') => {
+                        app.tab = Tab::Sky;
+                    }
+                    KeyCode::Char('w') | KeyCode::Char('W') => {
+                        app.tab = Tab::Weather;
+                    }
+                    KeyCode::Char('l') | KeyCode::Char('L') => {
+                        app.input_mode = InputMode::EditingLat;
+                        app.input_buf = format!("{:.6}", app.lat);
+                    }
+                    KeyCode::Char('o') | KeyCode::Char('O') => {
+                        app.input_mode = InputMode::EditingLon;
+                        app.input_buf = format!("{:.6}", app.lon);
+                    }
+                    KeyCode::Char('t') | KeyCode::Char('T') => {
+                        app.input_mode = InputMode::EditingDatetime;
+                        app.input_buf = app.datetime.format("%Y-%m-%d %H:%M").to_string();
+                    }
+                    KeyCode::Char(' ') => {
+                        app.live_mode = !app.live_mode;
+                        if app.live_mode {
+                            app.datetime = Utc::now();
                             app.recompute();
                         }
-                        KeyCode::Char('-') => {
-                            app.max_mag = (app.max_mag - 0.5).max(0.0);
-                            app.recompute();
+                    }
+                    KeyCode::Char('+') | KeyCode::Char('=') => {
+                        app.max_mag = (app.max_mag + 0.5).min(8.0);
+                        app.recompute();
+                    }
+                    KeyCode::Char('-') => {
+                        app.max_mag = (app.max_mag - 0.5).max(0.0);
+                        app.recompute();
+                    }
+                    KeyCode::Char('d') | KeyCode::Char('D') => {
+                        app.test_mode = !app.test_mode;
+                        app.recompute();
+                    }
+                    KeyCode::Char('r') | KeyCode::Char('R') => {
+                        if !app.weather_loading {
+                            spawn_weather(&tx, app.lat, app.lon);
+                            app.weather_loading = true;
                         }
-                        KeyCode::Char('d') | KeyCode::Char('D') => {
-                            app.test_mode = !app.test_mode;
-                            app.recompute();
+                    }
+                    KeyCode::Up => {
+                        app.weather_scroll = app.weather_scroll.saturating_sub(1);
+                    }
+                    KeyCode::Down => {
+                        let max = app
+                            .forecasts
+                            .as_ref()
+                            .map(|f| f.len().saturating_sub(1))
+                            .unwrap_or(0);
+                        if app.weather_scroll < max {
+                            app.weather_scroll += 1;
                         }
-                        KeyCode::Char('r') | KeyCode::Char('R') => {
-                            if !app.weather_loading {
-                                spawn_weather(&tx, app.lat, app.lon);
-                                app.weather_loading = true;
-                            }
-                        }
-                        KeyCode::Up => {
-                            app.weather_scroll = app.weather_scroll.saturating_sub(1);
-                        }
-                        KeyCode::Down => {
-                            let max = app
-                                .forecasts
-                                .as_ref()
-                                .map(|f| f.len().saturating_sub(1))
-                                .unwrap_or(0);
-                            if app.weather_scroll < max {
-                                app.weather_scroll += 1;
-                            }
-                        }
-                        _ => {}
-                    },
-                    InputMode::EditingLat
-                    | InputMode::EditingLon
-                    | InputMode::EditingDatetime => match key.code {
+                    }
+                    _ => {}
+                },
+                InputMode::EditingLat | InputMode::EditingLon | InputMode::EditingDatetime => {
+                    match key.code {
                         KeyCode::Esc => {
                             app.input_mode = InputMode::Normal;
                             app.input_buf.clear();
@@ -201,7 +194,7 @@ fn run(
                             app.input_buf.push(c);
                         }
                         _ => {}
-                    },
+                    }
                 }
             }
         }
@@ -223,9 +216,7 @@ fn apply_input(app: &mut App) {
             }
         }
         InputMode::EditingDatetime => {
-            if let Ok(naive) =
-                NaiveDateTime::parse_from_str(&app.input_buf, "%Y-%m-%d %H:%M")
-            {
+            if let Ok(naive) = NaiveDateTime::parse_from_str(&app.input_buf, "%Y-%m-%d %H:%M") {
                 app.datetime = DateTime::from_naive_utc_and_offset(naive, Utc);
                 app.live_mode = false;
             }

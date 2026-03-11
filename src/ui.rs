@@ -12,6 +12,34 @@ use ratatui::{
 use crate::app::{App, InputMode, Tab};
 use stellui::astro::CartesianCoordinates;
 
+fn planet_color(name: &str) -> Color {
+    match name {
+        "Mercury" => Color::Gray,
+        "Venus" => Color::Yellow,
+        "Mars" => Color::Red,
+        "Jupiter" => Color::White,
+        "Saturn" => Color::Yellow,
+        "Uranus" => Color::Cyan,
+        "Neptune" => Color::Blue,
+        _ => Color::White,
+    }
+}
+
+fn moon_phase_char(cycle_degrees: f64) -> &'static str {
+    // cycle_degrees: 0° = new moon, 90° = first quarter, 180° = full moon, 270° = last quarter
+    match (cycle_degrees / 45.0) as u8 {
+        0 => "🌑",
+        1 => "🌒",
+        2 => "🌓",
+        3 => "🌔",
+        4 => "🌕",
+        5 => "🌖",
+        6 => "🌗",
+        7 => "🌘",
+        _ => "🌑",
+    }
+}
+
 pub fn render(f: &mut Frame, app: &App) {
     let chunks = Layout::vertical([
         Constraint::Length(3),
@@ -37,19 +65,19 @@ fn render_tabs(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     };
     let tabs = Tabs::new(vec!["[S] Sky", "[W] Weather"])
         .select(selected)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Stellui "),
+        .block(Block::default().borders(Borders::ALL).title(" Stellui "))
+        .highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )
-        .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
         .divider("|");
     f.render_widget(tabs, area);
 }
 
 fn render_sky(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let cols = Layout::horizontal([Constraint::Percentage(80), Constraint::Percentage(20)])
-        .split(area);
+    let cols =
+        Layout::horizontal([Constraint::Percentage(80), Constraint::Percentage(20)]).split(area);
 
     render_canvas(f, app, cols[0]);
     render_info_panel(f, app, cols[1]);
@@ -77,6 +105,12 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .map(|s| (s.x, s.y))
         .collect();
 
+    let planet_positions: Vec<(&str, &str, f64, f64, ratatui::style::Color)> = app
+        .planets
+        .iter()
+        .map(|p| (p.name, p.symbol, p.x, p.y, planet_color(p.name)))
+        .collect();
+
     let sun_pos = app.sun_moon.sun_stereo.as_ref().map(|p| {
         let c = CartesianCoordinates::from(p);
         (c.x, c.y)
@@ -85,8 +119,7 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         let c = CartesianCoordinates::from(p);
         (c.x, c.y)
     });
-    let phase_angle = app.sun_moon.moon_phase_angle;
-    let phase_pct = (1.0 - phase_angle.to_radians().cos()) / 2.0 * 100.0;
+    let phase_angle = app.sun_moon.moon_cycle_degrees;
 
     let canvas_title = if test_mode {
         " Sky View (horizon circle, N=bottom) [ORION ONLY] "
@@ -95,11 +128,7 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     };
 
     let canvas = Canvas::default()
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(canvas_title),
-        )
+        .block(Block::default().borders(Borders::ALL).title(canvas_title))
         .x_bounds([-2.2, 2.2])
         .y_bounds([-2.2, 2.2])
         .background_color(Color::Black)
@@ -140,7 +169,7 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 ctx.print(
                     sx,
                     sy,
-                    Line::from(Span::styled("☀", Style::default().fg(Color::Yellow))),
+                    Line::from(Span::styled("🌞", Style::default().fg(Color::Yellow))),
                 );
             }
 
@@ -148,9 +177,19 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 ctx.print(
                     mx,
                     my,
-                    Line::from(Span::styled("●", Style::default().fg(Color::White))),
+                    Line::from(Span::styled(
+                        moon_phase_char(phase_angle),
+                        Style::default().fg(Color::White),
+                    )),
                 );
-                ctx.print(mx + 0.12, my + 0.12, format!("{phase_pct:.0}%"));
+            }
+
+            for (_name, symbol, x, y, color) in &planet_positions {
+                ctx.print(
+                    *x,
+                    *y,
+                    Line::from(Span::styled(*symbol, Style::default().fg(*color))),
+                );
             }
         });
 
@@ -166,11 +205,13 @@ fn render_info_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Some(_) => "Above horizon",
         None => "Below horizon",
     };
-    let phase_pct =
-        (1.0 - app.sun_moon.moon_phase_angle.to_radians().cos()) / 2.0 * 100.0;
+    let phase_pct = (1.0 - app.sun_moon.moon_cycle_degrees.to_radians().cos()) / 2.0 * 100.0;
 
-    let text = vec![
-        Line::from(Span::styled(" Sky Info", Style::default().add_modifier(Modifier::BOLD))),
+    let mut text = vec![
+        Line::from(Span::styled(
+            " Sky Info",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
         Line::from(""),
         Line::from(format!(" Stars: {}", app.stars.len())),
         Line::from(format!(" Max mag: {:.1}", app.max_mag)),
@@ -181,8 +222,23 @@ fn render_info_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Line::from(Span::styled(" Moon", Style::default().fg(Color::White))),
         Line::from(format!("  {moon_status}")),
         Line::from(format!("  Phase: {phase_pct:.0}%")),
-        Line::from(format!("  Angle: {:.1}°", app.sun_moon.moon_phase_angle)),
+        Line::from(format!("  Cycle: {:.1}°", app.sun_moon.moon_cycle_degrees)),
+        Line::from(""),
+        Line::from(Span::styled(
+            " Planets",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
     ];
+    if app.planets.is_empty() {
+        text.push(Line::from("  none above horizon"));
+    } else {
+        for p in &app.planets {
+            text.push(Line::from(Span::styled(
+                format!("  {} {} ({:.1})", p.symbol, p.name, p.mag),
+                Style::default().fg(planet_color(p.name)),
+            )));
+        }
+    }
 
     let para = Paragraph::new(text).block(Block::default().borders(Borders::ALL).title(" Info "));
     f.render_widget(para, area);
@@ -213,8 +269,10 @@ fn render_weather(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(5)]).split(area);
 
     // Table
-    let header = Row::new(vec!["Time", "Cloud%", "Humid%", "Precip%", "Vis(km)", "Temp°C", "Seeing"])
-        .style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED));
+    let header = Row::new(vec![
+        "Time", "Cloud%", "Humid%", "Precip%", "Vis(km)", "Temp°C", "Seeing",
+    ])
+    .style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED));
 
     let rows: Vec<Row> = forecasts
         .iter()
@@ -248,13 +306,11 @@ fn render_weather(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Constraint::Length(10),
     ];
 
-    let table = Table::new(rows, widths)
-        .header(header)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Weather Forecast (↑/↓ scroll) "),
-        );
+    let table = Table::new(rows, widths).header(header).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Weather Forecast (↑/↓ scroll) "),
+    );
 
     let mut state = TableState::default();
     state.select(Some(app.weather_scroll));

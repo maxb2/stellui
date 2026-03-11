@@ -1,0 +1,156 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-linux-windows:
+    name: Build Linux and Windows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: >
+          sudo apt-get update &&
+          sudo apt-get install -y libclang-dev gcc-aarch64-linux-gnu gcc-mingw-w64-x86-64
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu,x86_64-pc-windows-gnu
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: linux-windows-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: linux-windows-cargo-
+
+      - name: Build Linux x86_64
+        run: cargo build --release --locked --target x86_64-unknown-linux-gnu
+
+      - name: Build Linux aarch64
+        run: cargo build --release --locked --target aarch64-unknown-linux-gnu
+        env:
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Build Windows x86_64
+        run: cargo build --release --locked --target x86_64-pc-windows-gnu
+        env:
+          CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
+          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
+
+      - name: Stage artifacts
+        run: |
+          cp target/x86_64-unknown-linux-gnu/release/stellui stellui-linux-x86_64
+          cp target/aarch64-unknown-linux-gnu/release/stellui stellui-linux-aarch64
+          cp target/x86_64-pc-windows-gnu/release/stellui.exe stellui-windows-x86_64.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-windows-artifacts
+          path: |
+            stellui-linux-x86_64
+            stellui-linux-aarch64
+            stellui-windows-x86_64.exe
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: macos-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: macos-cargo-
+
+      - name: Build macOS x86_64
+        run: cargo build --release --locked --target x86_64-apple-darwin
+
+      - name: Build macOS aarch64
+        run: cargo build --release --locked --target aarch64-apple-darwin
+
+      - name: Stage artifacts
+        run: |
+          cp target/x86_64-apple-darwin/release/stellui stellui-macos-x86_64
+          cp target/aarch64-apple-darwin/release/stellui stellui-macos-aarch64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: |
+            stellui-macos-x86_64
+            stellui-macos-aarch64
+          if-no-files-found: error
+
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    needs:
+      - build-linux-windows
+      - build-macos
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish
+        run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs:
+      - build-linux-windows
+      - build-macos
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          merge-multiple: true
+
+      - name: Create release and upload binaries
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/stellui-linux-x86_64
+            artifacts/stellui-linux-aarch64
+            artifacts/stellui-windows-x86_64.exe
+            artifacts/stellui-macos-x86_64
+            artifacts/stellui-macos-aarch64
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

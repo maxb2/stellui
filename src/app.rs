@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 
-use crate::sky::{self, RenderedStar, SunMoonInfo};
+use crate::sky::{self, RenderedPlanet, RenderedStar, SunMoonInfo};
 use crate::weather::HourlyForecast;
 
 pub enum Tab {
@@ -30,6 +30,7 @@ pub struct App {
 
     pub stars: Vec<RenderedStar>,
     pub sun_moon: SunMoonInfo,
+    pub planets: Vec<RenderedPlanet>,
 
     pub forecasts: Option<Vec<HourlyForecast>>,
     pub weather_loading: bool,
@@ -51,10 +52,11 @@ impl App {
             max_mag: 5.5,
             test_mode: false,
             stars: Vec::new(),
+            planets: Vec::new(),
             sun_moon: SunMoonInfo {
                 sun_stereo: None,
                 moon_stereo: None,
-                moon_phase_angle: 0.0,
+                moon_cycle_degrees: 0.0,
             },
             forecasts: None,
             weather_loading: false,
@@ -74,7 +76,7 @@ impl App {
             self.max_mag,
             self.test_mode,
         );
-        self.sun_moon =
-            sky::compute_sun_moon(self.lat, self.lon, self.height, self.datetime);
+        self.sun_moon = sky::compute_sun_moon(self.lat, self.lon, self.height, self.datetime);
+        self.planets = sky::compute_planets(self.lat, self.lon, self.height, self.datetime);
     }
 }

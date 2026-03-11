@@ -1,52 +1,47 @@
+//! Coordinate math and astronomy engine wrappers.
+//!
+//! This module bridges the raw C astronomy-engine FFI to ergonomic Rust types.
+//! All angle inputs/outputs are in **degrees** unless noted otherwise (RA is in
+//! hours, matching the catalog convention).
+
 use crate::catalog;
 use astronomy_engine_bindings::{
-    Astronomy_CurrentTime, Astronomy_DefineStar, Astronomy_Equator, Astronomy_Horizon,
-    Astronomy_HourAngle, Astronomy_Illumination, Astronomy_MakeObserver, Astronomy_MakeTime,
-    Astronomy_Pivot, Astronomy_RotateVector, Astronomy_Rotation_EQD_HOR,
-    astro_aberration_t_ABERRATION, astro_aberration_t_NO_ABERRATION, astro_body_t_BODY_MOON,
-    astro_body_t_BODY_STAR1, astro_body_t_BODY_SUN, astro_equator_date_t_EQUATOR_OF_DATE,
-    astro_equatorial_t, astro_horizon_t, astro_illum_t, astro_observer_t,
+    Astronomy_DefineStar, Astronomy_Equator, Astronomy_Horizon, Astronomy_MakeTime,
+    Astronomy_MoonPhase, astro_aberration_t_ABERRATION, astro_aberration_t_NO_ABERRATION,
+    astro_body_t_BODY_MOON, astro_body_t_BODY_STAR1, astro_body_t_BODY_SUN,
+    astro_equator_date_t_EQUATOR_OF_DATE, astro_equatorial_t, astro_horizon_t, astro_observer_t,
     astro_refraction_t_REFRACTION_NONE, astro_refraction_t_REFRACTION_NORMAL,
     astro_status_t_ASTRO_SUCCESS, astro_time_t,
 };
-use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
-use chrono_tz::Tz;
-use lazy_static::lazy_static;
+use chrono::{DateTime, Datelike, Timelike, Utc};
 use std::ops::{Add, Mul, Sub};
-use tzf_rs::DefaultFinder;
-use zeno::{Command, PathBuilder, Transform};
 
-lazy_static! {
-    pub static ref FINDER: DefaultFinder = DefaultFinder::new();
-}
-
-pub fn solar_time() {
-    unsafe {
-        let mut time = Astronomy_CurrentTime();
-        let observer = Astronomy_MakeObserver(38.933601, -92.362999, 0.0);
-        let ha = Astronomy_HourAngle(astro_body_t_BODY_SUN, &mut time as *mut _, observer);
-
-        if ha.status != astro_status_t_ASTRO_SUCCESS {
-            panic!("ERROR {} in Astronomy_HourAngle().", ha.status);
-        }
-
-        println!("{:?}", ha);
-    }
-}
-
-#[derive(Debug)]
-pub struct StarJ2000 {
-    pub ra: f64,   // hours
-    pub dec: f64,  // degrees
-    pub dist: f64, // light years
-}
-
+/// Errors that can occur while projecting a catalog star onto the horizon.
 #[derive(Debug)]
 pub enum StarHorizonError {
+    /// `Astronomy_DefineStar` returned a non-success status code.
     DefineStar(u32),
+    /// `Astronomy_Equator` (equator-of-date conversion) returned a non-success status code.
     EquatorOfDate(u32),
 }
 
+/// Project a catalog star onto the sky as stereographic polar coordinates.
+///
+/// # Parameters
+/// - `star` — catalog entry with `ra` in **hours** and `dec` in **degrees**
+/// - `time` — mutable astronomy-engine time (mutated internally by the C library)
+/// - `observer` — geographic observer position
+/// - `aberration` — whether to apply stellar aberration correction
+/// - `refraction` — whether to apply atmospheric refraction correction
+///
+/// # Returns
+/// [`PolarCoordinates`] where `rad` is the stereographic radius
+/// (`0` = zenith, `2.0` = horizon, `>2.0` = below horizon) and
+/// `phi` is the azimuth in degrees (North = 0°, East = 90°).
+///
+/// # Safety
+/// Calls unsafe FFI functions from `astronomy_engine_bindings`. The caller must
+/// ensure `time` and `observer` are valid values produced by the same library.
 pub fn star_stereo(
     star: &catalog::Star,
     time: &mut astro_time_t,
@@ -91,178 +86,15 @@ pub fn star_stereo(
 
         let stereo = hor_to_stereo(&hor);
 
-        return Ok(stereo);
+        Ok(stereo)
     }
 }
 
-pub fn star_horizon(
-    star: &StarJ2000,
-    time: &mut astro_time_t,
-    observer: &astro_observer_t,
-    aberration: bool,
-    refraction: bool,
-) -> Result<astro_horizon_t, StarHorizonError> {
-    unsafe {
-        let star_status =
-            Astronomy_DefineStar(astro_body_t_BODY_STAR1, star.ra, star.dec, star.dist);
-
-        if star_status != astro_status_t_ASTRO_SUCCESS {
-            return Err(StarHorizonError::DefineStar(star_status));
-        }
-
-        let eq_date = Astronomy_Equator(
-            astro_body_t_BODY_STAR1,
-            time as *mut _,
-            *observer,
-            astro_equator_date_t_EQUATOR_OF_DATE,
-            if aberration {
-                astro_aberration_t_ABERRATION
-            } else {
-                astro_aberration_t_NO_ABERRATION
-            },
-        );
-
-        if eq_date.status != astro_status_t_ASTRO_SUCCESS {
-            return Err(StarHorizonError::EquatorOfDate(eq_date.status));
-        }
-
-        let hor = Astronomy_Horizon(
-            time as *mut _,
-            *observer,
-            eq_date.ra,
-            eq_date.dec,
-            if refraction {
-                astro_refraction_t_REFRACTION_NORMAL
-            } else {
-                astro_refraction_t_REFRACTION_NONE
-            },
-        );
-
-        return Ok(hor);
-    }
-}
-
-pub fn horiz_example0() {
-    let ra_j2000 = 6.0 + 45.0 / 60.0 + 8.917 / 3600.0;
-    let dec_j2000 = -(16.0 + 42.0 / 60.0 + 58.02 / 3600.0);
-    let star = StarJ2000 {
-        ra: ra_j2000,
-        dec: dec_j2000,
-        dist: 8.6,
-    };
-
-    println!("{:?}", star);
-
-    let mut time: astro_time_t;
-    let observer = astro_observer_t {
-        latitude: 38.933601,
-        longitude: -92.362999,
-        height: 0.0,
-    };
-    unsafe {
-        time = Astronomy_MakeTime(2024, 1, 1, 1, 1, 1.0);
-    }
-    let hor = star_horizon(&star, &mut time, &observer, true, true).unwrap();
-
-    println!("{:?}", hor);
-
-    let hz = HzCoordinates {
-        alt: hor.altitude,
-        az: hor.azimuth,
-    };
-
-    println!("{:?}", hz_to_stereo(&hz));
-
-    for star in catalog::J2000_CATALOG.iter() {
-        let stereo = star_stereo(star, &mut time, &observer, true, true).unwrap();
-        println!("{:?}", star);
-        println!("{:?}", stereo);
-    }
-}
-
-pub fn horiz_example1() {
-    let observer = astro_observer_t {
-        latitude: 38.933601,
-        longitude: -92.362999,
-        height: 0.0,
-    };
-
-    let tz_name = FINDER.get_tz_name(observer.longitude, observer.latitude);
-
-    let tz: Tz = tz_name.parse().unwrap();
-
-    let dt = tz.with_ymd_and_hms(2016, 10, 22, 12, 0, 0);
-
-    let mut time = astro_time_from_datetime(dt.unwrap().to_utc());
-
-    catalog::J2000_CATALOG
-        .iter()
-        .filter(|&star| star.mag <= 5.0)
-        .map(|star| star_stereo(star, &mut time, &observer, true, true).unwrap())
-        .enumerate()
-        .for_each(|(ix, stereo)| {
-            println!("{:?} {:?}", ix, stereo);
-        });
-
-    unsafe {
-        let sun_eq = Astronomy_Equator(
-            astro_body_t_BODY_SUN,
-            &mut time as *mut _,
-            observer,
-            astro_equator_date_t_EQUATOR_OF_DATE,
-            astro_aberration_t_ABERRATION,
-        );
-
-        if sun_eq.status != astro_status_t_ASTRO_SUCCESS {
-            panic!("eq: {}", sun_eq.status);
-        }
-
-        let sun_hor = Astronomy_Horizon(
-            &mut time as *mut _,
-            observer,
-            sun_eq.ra,
-            sun_eq.dec,
-            astro_refraction_t_REFRACTION_NORMAL,
-        );
-
-        let sun_stereo = hor_to_stereo(&sun_hor);
-
-        println!("Sun: {:?} {:?}", sun_hor, sun_stereo);
-
-        let moon_eq = Astronomy_Equator(
-            astro_body_t_BODY_MOON,
-            &mut time as *mut _,
-            observer,
-            astro_equator_date_t_EQUATOR_OF_DATE,
-            astro_aberration_t_ABERRATION,
-        );
-
-        if moon_eq.status != astro_status_t_ASTRO_SUCCESS {
-            panic!("eq: {}", moon_eq.status);
-        }
-
-        let moon_hor = Astronomy_Horizon(
-            &mut time as *mut _,
-            observer,
-            moon_eq.ra,
-            moon_eq.dec,
-            astro_refraction_t_REFRACTION_NORMAL,
-        );
-
-        let moon_stereo = hor_to_stereo(&moon_hor);
-
-        println!("Moon: {:?} {:?}", moon_hor, moon_stereo);
-    }
-
-    println!("{:?}", observer);
-}
-
-#[derive(Debug, Clone)]
-pub struct HzCoordinates {
-    pub alt: f64,
-    pub az: f64,
-}
-
+/// 2-D canvas coordinates used by the ratatui [`Canvas`](ratatui::widgets::canvas::Canvas).
+///
+/// The `z` field is always `0.0`; it exists only for potential future use.
+/// Both `x` and `y` range over approximately `[-2.2, 2.2]`, matching the
+/// canvas bounds used by the sky renderer.
 #[derive(Debug, Clone)]
 pub struct CartesianCoordinates {
     pub x: f64,
@@ -318,20 +150,30 @@ impl From<PolarCoordinates> for CartesianCoordinates {
         CartesianCoordinates {
             x: polar_coord.rad * polar_coord.phi.to_radians().cos(),
             y: polar_coord.rad * polar_coord.phi.to_radians().sin(),
-            z: 0.0.into(),
+            z: 0.0,
         }
     }
 }
 
+/// Stereographic polar coordinates used for all-sky projection.
+///
+/// - `rad` — stereographic radius: `0.0` = zenith, `2.0` = horizon, `>2.0` = below horizon
+/// - `phi` — angle in **degrees**; raw value is azimuth (North=0°, East=90°) before
+///   [`canvas_orient`](PolarCoordinates::canvas_orient) is applied
 #[derive(Debug, Clone)]
 pub struct PolarCoordinates {
     pub rad: f64,
-    pub phi: f64, // degrees
+    /// Angle in degrees.
+    pub phi: f64,
 }
 
 impl Mul<f64> for PolarCoordinates {
     type Output = Self;
 
+    /// Scale the radius by `other`.
+    ///
+    /// If `other` is negative the radius is kept positive and `phi` is flipped
+    /// by 180°, preserving the geometric direction of the point.
     fn mul(self, other: f64) -> Self {
         if other < 0.0 {
             Self {
@@ -348,46 +190,56 @@ impl Mul<f64> for PolarCoordinates {
 }
 
 impl PolarCoordinates {
-    pub fn mut_canvas_orient(self: &mut Self) {
-        self.phi = self.phi - 90.0;
+    /// Rotate `phi` in-place by −90° so that the canvas orientation matches the
+    /// all-sky convention: **North = bottom, South = top, East = left, West = right**.
+    pub fn mut_canvas_orient(&mut self) {
+        self.phi -= 90.0;
     }
 
-    pub fn canvas_orient(self: Self) -> Self {
+    /// Return a new [`PolarCoordinates`] rotated by −90° for canvas orientation.
+    ///
+    /// Equivalent to [`mut_canvas_orient`](Self::mut_canvas_orient) but consumes
+    /// `self` and returns a new value.
+    pub fn canvas_orient(self) -> Self {
         Self {
             rad: self.rad,
             phi: self.phi - 90.0,
         }
     }
 
-    pub fn mut_rot(self: &mut Self, phi: f64) {
-        self.phi = self.phi + phi;
+    /// Rotate `phi` in-place by `phi` degrees (positive = counter-clockwise).
+    pub fn mut_rot(&mut self, phi: f64) {
+        self.phi += phi;
     }
 
-    pub fn rot(self: Self, phi: f64) -> Self {
+    /// Return a new [`PolarCoordinates`] with `phi` increased by `phi` degrees.
+    pub fn rot(self, phi: f64) -> Self {
         let mut out = self.clone();
         out.mut_rot(phi);
-        return out;
+        out
     }
 }
 
-pub fn hz_to_stereo(hz: &HzCoordinates) -> PolarCoordinates {
-    let radius = 2f64 * (45f64 - hz.alt / 2f64).to_radians().tan();
-
-    return PolarCoordinates {
-        rad: radius,
-        phi: hz.az,
-    };
-}
-
+/// Convert an astronomy-engine horizon position to stereographic polar coordinates.
+///
+/// Uses the formula `r = 2·tan(45° − alt/2)`:
+/// - altitude 90° (zenith) → `rad ≈ 0.0`
+/// - altitude 0° (horizon) → `rad = 2.0`
+/// - altitude < 0° (below horizon) → `rad > 2.0`
+///
+/// `phi` is set to `hz.azimuth` unchanged (North = 0°, East = 90°).
 pub fn hor_to_stereo(hz: &astro_horizon_t) -> PolarCoordinates {
     let radius = 2f64 * (45f64 - hz.altitude / 2f64).to_radians().tan();
 
-    return PolarCoordinates {
+    PolarCoordinates {
         rad: radius,
         phi: hz.azimuth,
-    };
+    }
 }
 
+/// Thin wrapper around `Astronomy_MakeTime` that accepts a [`chrono::DateTime<Utc>`].
+///
+/// Returns an `astro_time_t` suitable for passing to other astronomy-engine functions.
 pub fn astro_time_from_datetime(datetime: DateTime<Utc>) -> astro_time_t {
     unsafe {
         Astronomy_MakeTime(
@@ -401,130 +253,26 @@ pub fn astro_time_from_datetime(datetime: DateTime<Utc>) -> astro_time_t {
     }
 }
 
-#[derive(Debug)]
-pub enum MoonFaceTiltError {
-    RotationEqdHor(u32),
-    PivotAzimuth(u32),
-    PivotAltitude(u32),
-    RotateVector(u32),
-    UnitVectorTolerance(f64),
-}
-
-/// Calculates the tilt angle of the moon CCW from the unit vector perpendicular to the horizon.
-/// See AstronomyEngine's [camera demo](https://github.com/cosinekitty/astronomy/blob/master/demo/c/README.md#camera).
-pub fn _moon_face_tilt(
-    sun_eq: astro_equatorial_t,
-    moon_eq: astro_equatorial_t,
-    moon_hor: astro_horizon_t,
-    time: &mut astro_time_t,
-    observer: astro_observer_t,
-) -> Result<f64, MoonFaceTiltError> {
-    // const TOLERANCE: f64 = 1.0e-8;
-
-    // ccw angle from zenith
-    let moon_tilt: f64;
-
-    unsafe {
-        /* Get the rotation matrix that converts equatorial to horizontal coordintes for this place and time. */
-        let mut rot = Astronomy_Rotation_EQD_HOR(time as *mut _, observer);
-
-        /*
-            Modify the rotation matrix in two steps:
-            First, rotate the orientation so we are facing the Moon's azimuth.
-            We do this by pivoting around the zenith axis.
-            Horizontal axes are: 0 = north, 1 = west, 2 = zenith.
-            Tricky: because the pivot angle increases counterclockwise, and azimuth
-            increases clockwise, we undo the azimuth by adding the positive value.
-        */
-        rot = Astronomy_Pivot(rot, 2, moon_hor.azimuth);
-        if rot.status != astro_status_t_ASTRO_SUCCESS {
-            return Err(MoonFaceTiltError::PivotAzimuth(rot.status));
-        }
-
-        /*
-            Second, pivot around the leftward axis to bring the Moon to the camera's altitude level.
-            From the point of view of the leftward axis, looking toward the camera,
-            adding the angle is the correct sense for subtracting the altitude.
-        */
-        rot = Astronomy_Pivot(rot, 1, moon_hor.altitude);
-        if rot.status != astro_status_t_ASTRO_SUCCESS {
-            return Err(MoonFaceTiltError::PivotAltitude(rot.status));
-        }
-
-        /* As a sanity check, apply this rotation to the Moon's equatorial (EQD) coordinates and verify x=0, y=0. */
-        let check_vec = Astronomy_RotateVector(rot, moon_eq.vec);
-        if check_vec.status != astro_status_t_ASTRO_SUCCESS {
-            return Err(MoonFaceTiltError::RotateVector(check_vec.status));
-        }
-
-        /* Convert to unit vector. */
-        // let radius = Astronomy_VectorLength(check_vec);
-        // check_vec.x /= radius;
-        // check_vec.y /= radius;
-        // check_vec.z /= radius;
-        // println!(
-        //     "Moon check: x = {:0>.6}, y = {:0>.6}, z = {:0>.6}\n",
-        //     check_vec.x,
-        //     check_vec.y.abs(),
-        //     check_vec.z.abs()
-        // );
-        // let err = (check_vec.x - 1.0).abs();
-        // if err > TOLERANCE {
-        //     return Err(MoonFaceTiltError::UnitVectorTolerance(err));
-        // }
-
-        // if check_vec.y.abs() > tolerance {
-        //     panic!("Excessive error in moon check (y)");
-        // }
-
-        // if check_vec.z.abs() > tolerance {
-        //     panic!("Excessive error in moon check (z)");
-        // }
-
-        /* Apply the same rotation to the Sun's equatorial vector. */
-        /* The x- and y-coordinates now tell us which side appears sunlit in the camera! */
-
-        let vec = Astronomy_RotateVector(rot, sun_eq.vec);
-        if vec.status != astro_status_t_ASTRO_SUCCESS {
-            return Err(MoonFaceTiltError::RotateVector(vec.status));
-        }
-
-        /* Don't bother normalizing the Sun vector, because in AU it will be close to unit anyway. */
-        // println!(
-        //     "Sun vector: x = {:0>.6}, y = {:0>.6}, z = {:0>.6}\n",
-        //     vec.x, vec.y, vec.z
-        // );
-
-        /* Calculate the tilt angle of the sunlit side, as seen by the camera. */
-        /* The x-axis is now pointing directly at the object, z is up in the camera image, y is to the left. */
-        moon_tilt = vec.y.atan2(vec.z);
-        // println!(
-        //     "Tilt angle of sunlit side of the Moon = {:0>.3} degrees counterclockwise from up.\n",
-        //     moon_tilt
-        // );
-    }
-
-    Ok(moon_tilt.to_degrees())
-}
-
+/// Horizon positions of the Sun and Moon, plus the Moon's cycle position.
 #[derive(Debug)]
 pub struct SunMoonProjection {
-    pub sun_eq: astro_equatorial_t,
+    /// Horizon coordinates (altitude, azimuth in degrees) of the Sun.
     pub sun_hor: astro_horizon_t,
-    pub moon_eq: astro_equatorial_t,
+    /// Horizon coordinates (altitude, azimuth in degrees) of the Moon.
     pub moon_hor: astro_horizon_t,
-    pub moon_path: Vec<Command>,
-    pub moon_path_transform: zeno::Transform,
-    pub moon_phase_angle: f64, // degrees
-    pub moon_face_tilt: f64,   // degrees
+    /// Moon cycle position in degrees (0° = new moon, 90° = first quarter, 180° = full moon, 270° = last quarter).
+    pub moon_cycle_degrees: f64,
 }
 
 impl SunMoonProjection {
+    /// Compute Sun and Moon horizon positions and Moon phase for a given time and observer.
+    ///
+    /// # Panics
+    /// Panics if the astronomy engine fails to compute the Moon's illumination.
     pub fn from_time_observer(time: &mut astro_time_t, observer: &astro_observer_t) -> Self {
-        let sun_eq: astro_equatorial_t;
         let sun_hor: astro_horizon_t;
         unsafe {
-            sun_eq = Astronomy_Equator(
+            let sun_eq: astro_equatorial_t = Astronomy_Equator(
                 astro_body_t_BODY_SUN,
                 time as *mut _,
                 *observer,
@@ -540,17 +288,15 @@ impl SunMoonProjection {
             );
         }
 
-        let moon_eq: astro_equatorial_t;
         let moon_hor: astro_horizon_t;
         unsafe {
-            moon_eq = Astronomy_Equator(
+            let moon_eq: astro_equatorial_t = Astronomy_Equator(
                 astro_body_t_BODY_MOON,
                 time as *mut _,
                 *observer,
                 astro_equator_date_t_EQUATOR_OF_DATE,
                 astro_aberration_t_ABERRATION,
             );
-
             moon_hor = Astronomy_Horizon(
                 time as *mut _,
                 *observer,
@@ -560,135 +306,248 @@ impl SunMoonProjection {
             );
         }
 
-        let moon_face_tilt = _moon_face_tilt(sun_eq, moon_eq, moon_hor, time, *observer).unwrap();
-
-        let illum: astro_illum_t;
-
+        let moon_cycle_degrees: f64;
         unsafe {
-            illum = Astronomy_Illumination(astro_body_t_BODY_MOON, *time);
-
-            if illum.status != astro_status_t_ASTRO_SUCCESS {
-                panic!(
-                    "Error {} trying to calculate Moon illumination.\n",
-                    illum.status
-                );
+            let phase = Astronomy_MoonPhase(*time);
+            if phase.status != astro_status_t_ASTRO_SUCCESS {
+                panic!("Error {} trying to calculate Moon phase.\n", phase.status);
             }
+            moon_cycle_degrees = phase.angle;
         }
-
-        let moon_path = moon_phase_path_unit(illum.phase_angle as f32);
-
-        let moon_path_transform = Transform::rotation(zeno::Angle::from_degrees(
-            (-moon_face_tilt + 180. - moon_hor.azimuth) as f32,
-        ));
 
         Self {
-            sun_eq,
             sun_hor,
-            moon_eq,
             moon_hor,
-            moon_path,
-            moon_path_transform,
-            moon_phase_angle: illum.phase_angle,
-            moon_face_tilt,
+            moon_cycle_degrees,
         }
     }
 }
 
-pub fn moon_face_tilt(
-    time: &mut astro_time_t,
-    observer: &astro_observer_t,
-) -> (Result<f64, MoonFaceTiltError>, astro_horizon_t) {
-    let sun_eq: astro_equatorial_t;
-    unsafe {
-        sun_eq = Astronomy_Equator(
-            astro_body_t_BODY_SUN,
-            time as *mut _,
-            *observer,
-            astro_equator_date_t_EQUATOR_OF_DATE,
-            astro_aberration_t_ABERRATION,
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use astronomy_engine_bindings::astro_horizon_t;
+    use chrono::TimeZone;
+
+    fn make_hz(altitude: f64, azimuth: f64) -> astro_horizon_t {
+        astro_horizon_t {
+            altitude,
+            azimuth,
+            ra: 0.0,
+            dec: 0.0,
+        }
+    }
+
+    // --- hor_to_stereo ---
+
+    #[test]
+    fn hor_to_stereo_zenith() {
+        let hz = make_hz(90.0, 0.0);
+        let p = hor_to_stereo(&hz);
+        assert!(
+            p.rad.abs() < 1e-10,
+            "zenith rad should be ~0, got {}",
+            p.rad
         );
     }
 
-    let moon_eq: astro_equatorial_t;
-    let moon_hor: astro_horizon_t;
-    unsafe {
-        moon_eq = Astronomy_Equator(
-            astro_body_t_BODY_MOON,
-            time as *mut _,
-            *observer,
-            astro_equator_date_t_EQUATOR_OF_DATE,
-            astro_aberration_t_ABERRATION,
-        );
-
-        moon_hor = Astronomy_Horizon(
-            time as *mut _,
-            *observer,
-            moon_eq.ra,
-            moon_eq.dec,
-            astro_refraction_t_REFRACTION_NORMAL,
+    #[test]
+    fn hor_to_stereo_horizon() {
+        let hz = make_hz(0.0, 0.0);
+        let p = hor_to_stereo(&hz);
+        assert!(
+            (p.rad - 2.0).abs() < 1e-10,
+            "horizon rad should be 2.0, got {}",
+            p.rad
         );
     }
 
-    (
-        _moon_face_tilt(sun_eq, moon_eq, moon_hor, time, *observer),
-        moon_hor,
-    )
-}
-
-/// Constructs a path describing the illuminated part of the moon.
-/// Note: this returns arcs with unit radius and the illuminated
-/// part oriented upward. You should scale this by the final moon
-/// radius and rotate to the final orientation.
-pub fn moon_phase_path_unit(phase_angle: f32) -> Vec<Command> {
-    let mut path: Vec<Command> = Vec::new();
-
-    const LEFT: (f32, f32) = (-1f32, 0f32);
-
-    const RIGHT: (f32, f32) = (1f32, 0f32);
-
-    path.move_to(LEFT);
-
-    let sweep_angle: zeno::Angle = zeno::Angle::from_degrees(180.);
-
-    let sweep_outer: zeno::ArcSweep;
-    let sweep_inner: zeno::ArcSweep;
-
-    let mut _phase_angle = phase_angle;
-
-    if 0. <= phase_angle && phase_angle < 90. {
-        sweep_outer = zeno::ArcSweep::Positive;
-        sweep_inner = zeno::ArcSweep::Positive;
-    } else if 90. <= phase_angle && phase_angle < 180. {
-        sweep_outer = zeno::ArcSweep::Positive;
-        sweep_inner = zeno::ArcSweep::Negative;
-    } else if 180. <= phase_angle && phase_angle < 270. {
-        _phase_angle = 360. - phase_angle;
-        sweep_outer = zeno::ArcSweep::Positive;
-        sweep_inner = zeno::ArcSweep::Negative;
-    } else {
-        _phase_angle = 360.0 - phase_angle;
-        sweep_outer = zeno::ArcSweep::Positive;
-        sweep_inner = zeno::ArcSweep::Positive;
+    #[test]
+    fn hor_to_stereo_below_horizon() {
+        let hz = make_hz(-10.0, 0.0);
+        let p = hor_to_stereo(&hz);
+        assert!(
+            p.rad > 2.0,
+            "below-horizon rad should be >2.0, got {}",
+            p.rad
+        );
     }
 
-    let ry = _phase_angle.to_radians().cos().abs().max(1e-16);
+    #[test]
+    fn hor_to_stereo_azimuth_passthrough() {
+        let hz = make_hz(45.0, 137.5);
+        let p = hor_to_stereo(&hz);
+        assert_eq!(p.phi, 137.5);
+    }
 
-    path.arc_to(
-        1f32,
-        1f32,
-        sweep_angle,
-        zeno::ArcSize::Small,
-        sweep_outer,
-        RIGHT,
-    )
-    .arc_to(
-        1f32,
-        ry,
-        sweep_angle,
-        zeno::ArcSize::Small,
-        sweep_inner,
-        LEFT,
-    );
+    // --- canvas_orient / mut_canvas_orient ---
 
-    path
+    #[test]
+    fn canvas_orient_shifts_phi() {
+        let p = PolarCoordinates {
+            rad: 1.0,
+            phi: 100.0,
+        };
+        let oriented = p.canvas_orient();
+        assert_eq!(oriented.phi, 10.0);
+    }
+
+    #[test]
+    fn mut_canvas_orient_shifts_phi() {
+        let mut p = PolarCoordinates {
+            rad: 1.0,
+            phi: 100.0,
+        };
+        p.mut_canvas_orient();
+        assert_eq!(p.phi, 10.0);
+    }
+
+    // --- rot / mut_rot ---
+
+    #[test]
+    fn rot_adds_angle() {
+        let p = PolarCoordinates {
+            rad: 1.0,
+            phi: 10.0,
+        };
+        let rotated = p.rot(45.0);
+        assert_eq!(rotated.phi, 55.0);
+    }
+
+    // --- Mul<f64> ---
+
+    #[test]
+    fn polar_mul_positive() {
+        let p = PolarCoordinates {
+            rad: 2.0,
+            phi: 30.0,
+        };
+        let scaled = p * 3.0;
+        assert_eq!(scaled.rad, 6.0);
+        assert_eq!(scaled.phi, 30.0);
+    }
+
+    #[test]
+    fn polar_mul_negative() {
+        let p = PolarCoordinates {
+            rad: 2.0,
+            phi: 30.0,
+        };
+        let scaled = p * -1.0;
+        assert_eq!(scaled.rad, 2.0);
+        assert_eq!(scaled.phi, 210.0);
+    }
+
+    // --- CartesianCoordinates::from ---
+
+    #[test]
+    fn cartesian_from_polar_zero() {
+        let p = PolarCoordinates { rad: 0.0, phi: 0.0 };
+        let c = CartesianCoordinates::from(p);
+        assert!(c.x.abs() < 1e-10);
+        assert!(c.y.abs() < 1e-10);
+    }
+
+    #[test]
+    fn cartesian_from_polar_north() {
+        // phi=0° → x=rad, y=0
+        let p = PolarCoordinates { rad: 1.0, phi: 0.0 };
+        let c = CartesianCoordinates::from(p);
+        assert!((c.x - 1.0).abs() < 1e-10, "x={}", c.x);
+        assert!(c.y.abs() < 1e-10, "y={}", c.y);
+    }
+
+    #[test]
+    fn cartesian_from_polar_east() {
+        // phi=90° → x≈0, y=rad
+        let p = PolarCoordinates {
+            rad: 1.0,
+            phi: 90.0,
+        };
+        let c = CartesianCoordinates::from(p);
+        assert!(c.x.abs() < 1e-10, "x={}", c.x);
+        assert!((c.y - 1.0).abs() < 1e-10, "y={}", c.y);
+    }
+
+    #[test]
+    fn cartesian_add() {
+        let a = CartesianCoordinates {
+            x: 1.0,
+            y: 2.0,
+            z: 0.0,
+        };
+        let b = CartesianCoordinates {
+            x: 3.0,
+            y: 4.0,
+            z: 0.0,
+        };
+        let sum = a + b;
+        assert_eq!(sum.x, 4.0);
+        assert_eq!(sum.y, 6.0);
+    }
+
+    #[test]
+    fn cartesian_sub() {
+        let a = CartesianCoordinates {
+            x: 5.0,
+            y: 7.0,
+            z: 0.0,
+        };
+        let b = CartesianCoordinates {
+            x: 2.0,
+            y: 3.0,
+            z: 0.0,
+        };
+        let diff = a - b;
+        assert_eq!(diff.x, 3.0);
+        assert_eq!(diff.y, 4.0);
+    }
+
+    // --- FFI smoke tests ---
+
+    #[test]
+    fn astro_time_from_datetime_does_not_panic() {
+        let dt = Utc.with_ymd_and_hms(2024, 6, 21, 12, 0, 0).unwrap();
+        let _ = astro_time_from_datetime(dt);
+    }
+
+    #[test]
+    fn star_stereo_known_star() {
+        use astronomy_engine_bindings::astro_observer_t;
+
+        // Polaris: RA ≈ 2.530 h, Dec ≈ 89.264°
+        let polaris = crate::catalog::Star {
+            id: 99999,
+            ra: 2.530_111,
+            dec: 89.264_108,
+            mag: 1.98,
+        };
+
+        // NYC observer
+        let observer = astro_observer_t {
+            latitude: 40.71,
+            longitude: -74.01,
+            height: 0.0,
+        };
+
+        // Fixed UTC moment: 2024-06-21 12:00:00 UTC
+        let dt = Utc.with_ymd_and_hms(2024, 6, 21, 12, 0, 0).unwrap();
+        let mut time = astro_time_from_datetime(dt);
+
+        let result = star_stereo(&polaris, &mut time, &observer, false, false);
+        let polar = result.expect("Polaris projection should succeed");
+
+        // Polaris is always above the horizon from NYC
+        assert!(
+            polar.rad < 2.0,
+            "Polaris rad={} should be <2.0 (above horizon)",
+            polar.rad
+        );
+        // phi should be a valid azimuth
+        assert!(
+            polar.phi >= 0.0 && polar.phi < 360.0,
+            "phi={} out of range",
+            polar.phi
+        );
+    }
 }

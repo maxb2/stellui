@@ -100,8 +100,16 @@ pub fn fetch_forecast(lat: f64, lon: f64) -> anyhow::Result<Vec<HourlyForecast>>
     let forecasts = (0..n)
         .map(|i| {
             let cloud = h.cloud_cover.get(i).and_then(|x| *x).unwrap_or(0.0);
-            let humidity = h.relative_humidity_2m.get(i).and_then(|x| *x).unwrap_or(0.0);
-            let precip = h.precipitation_probability.get(i).and_then(|x| *x).unwrap_or(0.0);
+            let humidity = h
+                .relative_humidity_2m
+                .get(i)
+                .and_then(|x| *x)
+                .unwrap_or(0.0);
+            let precip = h
+                .precipitation_probability
+                .get(i)
+                .and_then(|x| *x)
+                .unwrap_or(0.0);
             let visibility_m = h.visibility.get(i).and_then(|x| *x).unwrap_or(0.0);
             let visibility_km = visibility_m / 1000.0;
             let temperature_c = h.temperature_2m.get(i).and_then(|x| *x).unwrap_or(0.0);

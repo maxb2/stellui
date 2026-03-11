@@ -1,14 +1,14 @@
 use astronomy_engine_bindings::{
-    astro_observer_t, Astronomy_Equator, Astronomy_Horizon, Astronomy_Illumination,
-    astro_aberration_t_ABERRATION, astro_body_t_BODY_JUPITER, astro_body_t_BODY_MARS,
-    astro_body_t_BODY_MERCURY, astro_body_t_BODY_NEPTUNE, astro_body_t_BODY_SATURN,
-    astro_body_t_BODY_URANUS, astro_body_t_BODY_VENUS, astro_equator_date_t_EQUATOR_OF_DATE,
+    Astronomy_Equator, Astronomy_Horizon, Astronomy_Illumination, astro_aberration_t_ABERRATION,
+    astro_body_t_BODY_JUPITER, astro_body_t_BODY_MARS, astro_body_t_BODY_MERCURY,
+    astro_body_t_BODY_NEPTUNE, astro_body_t_BODY_SATURN, astro_body_t_BODY_URANUS,
+    astro_body_t_BODY_VENUS, astro_equator_date_t_EQUATOR_OF_DATE, astro_observer_t,
     astro_refraction_t_REFRACTION_NORMAL, astro_status_t_ASTRO_SUCCESS,
 };
 use chrono::{DateTime, Utc};
 use stellui::astro::{
-    astro_time_from_datetime, hor_to_stereo, star_stereo, CartesianCoordinates, PolarCoordinates,
-    SunMoonProjection,
+    CartesianCoordinates, PolarCoordinates, SunMoonProjection, astro_time_from_datetime,
+    hor_to_stereo, star_stereo,
 };
 use stellui::catalog;
 

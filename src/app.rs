@@ -76,8 +76,7 @@ impl App {
             self.max_mag,
             self.test_mode,
         );
-        self.sun_moon =
-            sky::compute_sun_moon(self.lat, self.lon, self.height, self.datetime);
+        self.sun_moon = sky::compute_sun_moon(self.lat, self.lon, self.height, self.datetime);
         self.planets = sky::compute_planets(self.lat, self.lon, self.height, self.datetime);
     }
 }

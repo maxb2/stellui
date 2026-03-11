@@ -37,19 +37,19 @@ fn render_tabs(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     };
     let tabs = Tabs::new(vec!["[S] Sky", "[W] Weather"])
         .select(selected)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Stellui "),
+        .block(Block::default().borders(Borders::ALL).title(" Stellui "))
+        .highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )
-        .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
         .divider("|");
     f.render_widget(tabs, area);
 }
 
 fn render_sky(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let cols = Layout::horizontal([Constraint::Percentage(80), Constraint::Percentage(20)])
-        .split(area);
+    let cols =
+        Layout::horizontal([Constraint::Percentage(80), Constraint::Percentage(20)]).split(area);
 
     render_canvas(f, app, cols[0]);
     render_info_panel(f, app, cols[1]);
@@ -113,11 +113,7 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     };
 
     let canvas = Canvas::default()
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(canvas_title),
-        )
+        .block(Block::default().borders(Borders::ALL).title(canvas_title))
         .x_bounds([-2.2, 2.2])
         .y_bounds([-2.2, 2.2])
         .background_color(Color::Black)
@@ -192,11 +188,13 @@ fn render_info_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Some(_) => "Above horizon",
         None => "Below horizon",
     };
-    let phase_pct =
-        (1.0 - app.sun_moon.moon_phase_angle.to_radians().cos()) / 2.0 * 100.0;
+    let phase_pct = (1.0 - app.sun_moon.moon_phase_angle.to_radians().cos()) / 2.0 * 100.0;
 
     let mut text = vec![
-        Line::from(Span::styled(" Sky Info", Style::default().add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            " Sky Info",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
         Line::from(""),
         Line::from(format!(" Stars: {}", app.stars.len())),
         Line::from(format!(" Max mag: {:.1}", app.max_mag)),
@@ -209,7 +207,10 @@ fn render_info_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Line::from(format!("  Phase: {phase_pct:.0}%")),
         Line::from(format!("  Angle: {:.1}°", app.sun_moon.moon_phase_angle)),
         Line::from(""),
-        Line::from(Span::styled(" Planets", Style::default().add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            " Planets",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
     ];
     if app.planets.is_empty() {
         text.push(Line::from("  none above horizon"));
@@ -261,8 +262,10 @@ fn render_weather(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(5)]).split(area);
 
     // Table
-    let header = Row::new(vec!["Time", "Cloud%", "Humid%", "Precip%", "Vis(km)", "Temp°C", "Seeing"])
-        .style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED));
+    let header = Row::new(vec![
+        "Time", "Cloud%", "Humid%", "Precip%", "Vis(km)", "Temp°C", "Seeing",
+    ])
+    .style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED));
 
     let rows: Vec<Row> = forecasts
         .iter()
@@ -296,13 +299,11 @@ fn render_weather(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Constraint::Length(10),
     ];
 
-    let table = Table::new(rows, widths)
-        .header(header)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Weather Forecast (↑/↓ scroll) "),
-        );
+    let table = Table::new(rows, widths).header(header).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Weather Forecast (↑/↓ scroll) "),
+    );
 
     let mut state = TableState::default();
     state.select(Some(app.weather_scroll));

@@ -91,7 +91,7 @@ pub fn star_stereo(
 
         let stereo = hor_to_stereo(&hor);
 
-        return Ok(stereo);
+        Ok(stereo)
     }
 }
 
@@ -138,7 +138,7 @@ pub fn star_horizon(
             },
         );
 
-        return Ok(hor);
+        Ok(hor)
     }
 }
 
@@ -318,7 +318,7 @@ impl From<PolarCoordinates> for CartesianCoordinates {
         CartesianCoordinates {
             x: polar_coord.rad * polar_coord.phi.to_radians().cos(),
             y: polar_coord.rad * polar_coord.phi.to_radians().sin(),
-            z: 0.0.into(),
+            z: 0.0,
         }
     }
 }
@@ -348,44 +348,44 @@ impl Mul<f64> for PolarCoordinates {
 }
 
 impl PolarCoordinates {
-    pub fn mut_canvas_orient(self: &mut Self) {
-        self.phi = self.phi - 90.0;
+    pub fn mut_canvas_orient(&mut self) {
+        self.phi -= 90.0;
     }
 
-    pub fn canvas_orient(self: Self) -> Self {
+    pub fn canvas_orient(self) -> Self {
         Self {
             rad: self.rad,
             phi: self.phi - 90.0,
         }
     }
 
-    pub fn mut_rot(self: &mut Self, phi: f64) {
-        self.phi = self.phi + phi;
+    pub fn mut_rot(&mut self, phi: f64) {
+        self.phi += phi;
     }
 
-    pub fn rot(self: Self, phi: f64) -> Self {
+    pub fn rot(self, phi: f64) -> Self {
         let mut out = self.clone();
         out.mut_rot(phi);
-        return out;
+        out
     }
 }
 
 pub fn hz_to_stereo(hz: &HzCoordinates) -> PolarCoordinates {
     let radius = 2f64 * (45f64 - hz.alt / 2f64).to_radians().tan();
 
-    return PolarCoordinates {
+    PolarCoordinates {
         rad: radius,
         phi: hz.az,
-    };
+    }
 }
 
 pub fn hor_to_stereo(hz: &astro_horizon_t) -> PolarCoordinates {
     let radius = 2f64 * (45f64 - hz.altitude / 2f64).to_radians().tan();
 
-    return PolarCoordinates {
+    PolarCoordinates {
         rad: radius,
         phi: hz.azimuth,
-    };
+    }
 }
 
 pub fn astro_time_from_datetime(datetime: DateTime<Utc>) -> astro_time_t {
@@ -655,13 +655,13 @@ pub fn moon_phase_path_unit(phase_angle: f32) -> Vec<Command> {
 
     let mut _phase_angle = phase_angle;
 
-    if 0. <= phase_angle && phase_angle < 90. {
+    if (0. ..90.).contains(&phase_angle) {
         sweep_outer = zeno::ArcSweep::Positive;
         sweep_inner = zeno::ArcSweep::Positive;
-    } else if 90. <= phase_angle && phase_angle < 180. {
+    } else if (90. ..180.).contains(&phase_angle) {
         sweep_outer = zeno::ArcSweep::Positive;
         sweep_inner = zeno::ArcSweep::Negative;
-    } else if 180. <= phase_angle && phase_angle < 270. {
+    } else if (180. ..270.).contains(&phase_angle) {
         _phase_angle = 360. - phase_angle;
         sweep_outer = zeno::ArcSweep::Positive;
         sweep_inner = zeno::ArcSweep::Negative;

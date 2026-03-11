@@ -1,3 +1,5 @@
+#![allow(clippy::approx_constant)]
+
 #[derive(Debug)]
 pub struct Star {
     pub id: u32,

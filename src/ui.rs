@@ -455,17 +455,25 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         format!(" [{}]", label)
     };
 
+    let local_str = if let Some(tz) = app.timezone {
+        let local = app.datetime.with_timezone(&tz);
+        format!("  {}", local.format("%H:%M %Z"))
+    } else {
+        String::new()
+    };
+
     let editing_hint = match app.input_mode {
         InputMode::Normal => String::new(),
         InputMode::EditingLat => format!(" Editing lat: {}_", app.input_buf),
         InputMode::EditingLon => format!(" Editing lon: {}_", app.input_buf),
-        InputMode::EditingDatetime => format!(" Editing time: {}_", app.input_buf),
+        InputMode::EditingDatetime => format!(" Editing time (local): {}_", app.input_buf),
+        InputMode::EditingTimezone => format!(" Editing timezone: {}_", app.input_buf),
     };
 
     let line1 = if editing_hint.is_empty() {
         format!(
-            " Lat:{:.4} Lon:{:.4} {}{}",
-            app.lat, app.lon, dt_str, mode_str
+            " Lat:{:.4} Lon:{:.4}  {}{}{}",
+            app.lat, app.lon, dt_str, local_str, mode_str
         )
     } else {
         editing_hint
@@ -473,13 +481,13 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let line2 = match app.tab {
         Tab::Sky =>
-            " [L]lat [O]lon [T]time [N]now [Space]pause [,/.]speed [+/-]mag [D]orion [S/W/P/A]tab [Q]quit",
+            " [L]lat [O]lon [T]time [Z]tz [N]now [Space]pause [,/.]speed [+/-]mag [D]orion [S/W/P/A]tab [Q]quit",
         Tab::Weather =>
             " [L]lat [O]lon [R]weather [↑/↓]scroll [S/W/P/A]tab [Q]quit",
         Tab::SolarSystem =>
-            " [L]lat [O]lon [T]time [N]now [Space]pause [,/.]speed [S/W/P/A]tab [Q]quit",
+            " [L]lat [O]lon [T]time [Z]tz [N]now [Space]pause [,/.]speed [S/W/P/A]tab [Q]quit",
         Tab::Almanac =>
-            " [L]lat [O]lon [T]time [N]now [Space]pause [,/.]speed [S/W/P/A]tab [Q]quit",
+            " [L]lat [O]lon [T]time [Z]tz [N]now [Space]pause [,/.]speed [S/W/P/A]tab [Q]quit",
     };
 
     let text = vec![Line::from(line1), Line::from(line2)];
@@ -547,7 +555,7 @@ fn render_almanac_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Almanac — 24h Altitude (midnight top, clockwise) "),
+                .title(" Almanac — 24h Altitude (local midnight top, clockwise) "),
         )
         .x_bounds([-1.3, 1.3])
         .y_bounds([-1.3, 1.3])
@@ -621,7 +629,7 @@ fn render_almanac_legend(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         )),
         Line::from(""),
         Line::from(Span::styled(
-            " midnight=top, clockwise",
+            " local midnight=top, clockwise",
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(Span::styled(

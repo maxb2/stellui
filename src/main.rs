@@ -8,7 +8,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use crossterm::{
     ExecutableCommand,
     event::{self, Event, KeyCode, KeyModifiers},
@@ -16,7 +16,7 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use app::{App, InputMode, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab};
+use app::{App, InputMode, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab, resolve_tz};
 use weather::HourlyForecast;
 
 fn main() -> Result<()> {
@@ -138,7 +138,7 @@ fn run(
                     }
                     KeyCode::Char('a') | KeyCode::Char('A') => {
                         app.tab = Tab::Almanac;
-                        app.almanac = sky::compute_almanac(app.lat, app.lon, app.height, app.datetime);
+                        app.almanac = sky::compute_almanac(app.lat, app.lon, app.height, app.datetime, app.timezone);
                     }
                     KeyCode::Char('l') | KeyCode::Char('L') => {
                         app.input_mode = InputMode::EditingLat;
@@ -150,7 +150,17 @@ fn run(
                     }
                     KeyCode::Char('t') | KeyCode::Char('T') => {
                         app.input_mode = InputMode::EditingDatetime;
-                        app.input_buf = app.datetime.format("%Y-%m-%d %H:%M").to_string();
+                        app.input_buf = if let Some(tz) = app.timezone {
+                            app.datetime.with_timezone(&tz).format("%Y-%m-%d %H:%M").to_string()
+                        } else {
+                            app.datetime.format("%Y-%m-%d %H:%M").to_string()
+                        };
+                    }
+                    KeyCode::Char('z') | KeyCode::Char('Z') => {
+                        app.input_mode = InputMode::EditingTimezone;
+                        app.input_buf = app.timezone
+                            .map(|tz| tz.name().to_string())
+                            .unwrap_or_default();
                     }
                     KeyCode::Char(' ') => {
                         if !app.live_mode {
@@ -224,7 +234,7 @@ fn run(
                     }
                     _ => {}
                 },
-                InputMode::EditingLat | InputMode::EditingLon | InputMode::EditingDatetime => {
+                InputMode::EditingLat | InputMode::EditingLon | InputMode::EditingDatetime | InputMode::EditingTimezone => {
                     match key.code {
                         KeyCode::Esc => {
                             app.input_mode = InputMode::Normal;
@@ -233,8 +243,10 @@ fn run(
                         KeyCode::Enter => {
                             apply_input(&mut app);
                             app.recompute();
-                            spawn_weather(&tx, app.lat, app.lon);
-                            app.weather_loading = true;
+                            if !matches!(app.input_mode, InputMode::EditingTimezone) {
+                                spawn_weather(&tx, app.lat, app.lon);
+                                app.weather_loading = true;
+                            }
                             app.input_mode = InputMode::Normal;
                             app.input_buf.clear();
                         }
@@ -259,18 +271,32 @@ fn apply_input(app: &mut App) {
         InputMode::EditingLat => {
             if let Ok(v) = app.input_buf.parse::<f64>() {
                 app.lat = v.clamp(-90.0, 90.0);
+                app.timezone = resolve_tz(app.lat, app.lon);
             }
         }
         InputMode::EditingLon => {
             if let Ok(v) = app.input_buf.parse::<f64>() {
                 app.lon = v.clamp(-180.0, 180.0);
+                app.timezone = resolve_tz(app.lat, app.lon);
             }
         }
         InputMode::EditingDatetime => {
             if let Ok(naive) = NaiveDateTime::parse_from_str(&app.input_buf, "%Y-%m-%d %H:%M") {
-                app.datetime = DateTime::from_naive_utc_and_offset(naive, Utc);
+                app.datetime = if let Some(tz) = app.timezone {
+                    tz.from_local_datetime(&naive)
+                        .single()
+                        .map(|dt: chrono::DateTime<chrono_tz::Tz>| dt.to_utc())
+                        .unwrap_or_else(|| DateTime::from_naive_utc_and_offset(naive, Utc))
+                } else {
+                    DateTime::from_naive_utc_and_offset(naive, Utc)
+                };
                 app.live_mode = false;
                 app.time_paused = true;
+            }
+        }
+        InputMode::EditingTimezone => {
+            if let Ok(tz) = app.input_buf.parse::<chrono_tz::Tz>() {
+                app.timezone = Some(tz);
             }
         }
         InputMode::Normal => {}

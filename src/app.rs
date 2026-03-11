@@ -1,6 +1,16 @@
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
+use tzf_rs::DefaultFinder;
+
+static TZ_FINDER: OnceLock<DefaultFinder> = OnceLock::new();
+
+pub fn resolve_tz(lat: f64, lon: f64) -> Option<chrono_tz::Tz> {
+    let finder = TZ_FINDER.get_or_init(DefaultFinder::new);
+    let name = finder.get_tz_name(lon, lat);
+    if name.is_empty() { None } else { name.parse().ok() }
+}
 
 use crate::sky::{self, AlmanacInfo, OrreryInfo, RenderedPlanet, RenderedStar, SunMoonInfo};
 use crate::weather::HourlyForecast;
@@ -47,6 +57,7 @@ pub enum InputMode {
     EditingLat,
     EditingLon,
     EditingDatetime,
+    EditingTimezone,
 }
 
 pub struct App {
@@ -55,6 +66,7 @@ pub struct App {
     pub lat: f64,
     pub lon: f64,
     pub height: f64,
+    pub timezone: Option<chrono_tz::Tz>,
     pub input_buf: String,
     pub datetime: DateTime<Utc>,
     pub live_mode: bool,
@@ -80,12 +92,14 @@ pub struct App {
 
 impl App {
     pub fn new(lat: f64, lon: f64, height: f64) -> Self {
+        let timezone = resolve_tz(lat, lon);
         let mut app = Self {
             tab: Tab::Sky,
             input_mode: InputMode::Normal,
             lat,
             lon,
             height,
+            timezone,
             input_buf: String::new(),
             datetime: Utc::now(),
             live_mode: false,
@@ -126,7 +140,7 @@ impl App {
         self.planets = sky::compute_planets(self.lat, self.lon, self.height, self.datetime);
         self.orrery = sky::compute_orrery(self.datetime);
         if matches!(self.tab, Tab::Almanac) {
-            self.almanac = sky::compute_almanac(self.lat, self.lon, self.height, self.datetime);
+            self.almanac = sky::compute_almanac(self.lat, self.lon, self.height, self.datetime, self.timezone);
         }
     }
 }

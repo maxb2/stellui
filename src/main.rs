@@ -1,4 +1,5 @@
 mod app;
+mod config;
 mod sky;
 mod ui;
 mod weather;
@@ -20,15 +21,20 @@ use app::{App, InputMode, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab, resolve_
 use weather::HourlyForecast;
 
 fn main() -> Result<()> {
+    let cfg = config::Config::load();
     let args: Vec<String> = std::env::args().collect();
-    let (lat, lon, height) = parse_args(&args);
+    let (lat, lon, height, timezone_str, max_mag) = parse_args(&args, &cfg);
+
+    let timezone_override = timezone_str
+        .as_deref()
+        .and_then(|s| s.parse::<chrono_tz::Tz>().ok());
 
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run(&mut terminal, lat, lon, height);
+    let result = run(&mut terminal, lat, lon, height, timezone_override, max_mag);
 
     disable_raw_mode()?;
     stdout().execute(LeaveAlternateScreen)?;
@@ -36,10 +42,15 @@ fn main() -> Result<()> {
     result
 }
 
-fn parse_args(args: &[String]) -> (f64, f64, f64) {
-    let mut lat = 40.71;
-    let mut lon = -74.01;
-    let mut height = 0.0;
+fn parse_args(args: &[String], cfg: &config::Config) -> (f64, f64, f64, Option<String>, Option<f64>) {
+    // Start from config defaults (which already fall back to built-in defaults via Option)
+    let mut lat = cfg.lat.unwrap_or(40.71);
+    let mut lon = cfg.lon.unwrap_or(-74.01);
+    let mut height = cfg.height.unwrap_or(0.0);
+    // timezone and max_mag come from config; CLI flags can override lat/lon/height only
+    let timezone = cfg.timezone.clone();
+    let max_mag = cfg.max_mag;
+
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -58,7 +69,7 @@ fn parse_args(args: &[String]) -> (f64, f64, f64) {
             _ => i += 1,
         }
     }
-    (lat, lon, height)
+    (lat, lon, height, timezone, max_mag)
 }
 
 fn spawn_weather(tx: &mpsc::Sender<Result<Vec<HourlyForecast>>>, lat: f64, lon: f64) {
@@ -73,8 +84,10 @@ fn run(
     lat: f64,
     lon: f64,
     height: f64,
+    timezone_override: Option<chrono_tz::Tz>,
+    max_mag_override: Option<f64>,
 ) -> Result<()> {
-    let mut app = App::new(lat, lon, height);
+    let mut app = App::new(lat, lon, height, timezone_override, max_mag_override);
     let (tx, rx) = mpsc::channel::<Result<Vec<HourlyForecast>>>();
 
     // Fetch weather on startup
@@ -262,6 +275,16 @@ fn run(
             }
         }
     }
+
+    // Persist current settings to config file
+    let cfg = config::Config {
+        lat: Some(app.lat),
+        lon: Some(app.lon),
+        height: Some(app.height),
+        timezone: app.timezone.map(|tz| tz.name().to_string()),
+        max_mag: Some(app.max_mag),
+    };
+    cfg.save().ok();
 
     Ok(())
 }

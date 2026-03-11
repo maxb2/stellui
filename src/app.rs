@@ -91,8 +91,8 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(lat: f64, lon: f64, height: f64) -> Self {
-        let timezone = resolve_tz(lat, lon);
+    pub fn new(lat: f64, lon: f64, height: f64, timezone_override: Option<chrono_tz::Tz>, max_mag_override: Option<f64>) -> Self {
+        let timezone = timezone_override.or_else(|| resolve_tz(lat, lon));
         let mut app = Self {
             tab: Tab::Sky,
             input_mode: InputMode::Normal,
@@ -107,7 +107,7 @@ impl App {
             orrery_speed_index: 5,
             time_paused: false,
             last_tick: Instant::now(),
-            max_mag: 5.5,
+            max_mag: max_mag_override.unwrap_or(5.5),
             test_mode: false,
             stars: Vec::new(),
             planets: Vec::new(),

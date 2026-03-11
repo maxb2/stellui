@@ -1,0 +1,16 @@
+# Stellui configuration file
+# Copy to:
+#   Linux/macOS: ~/.config/stellui/config.toml
+#   Windows:     %APPDATA%\stellui\config.toml
+
+# Observer location
+lat = 40.71       # latitude in degrees  (-90 to 90,  N positive)
+lon = -74.01      # longitude in degrees (-180 to 180, E positive)
+height = 0.0      # elevation in meters above sea level
+
+# Timezone (IANA name, e.g. "America/New_York")
+# If omitted, auto-detected from lat/lon.
+# timezone = "America/New_York"
+
+# Faintest magnitude to display (0 = brightest, 8 = very faint)
+# max_mag = 5.5

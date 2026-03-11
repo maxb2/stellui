@@ -32,6 +32,27 @@ stellui [--lat <degrees>] [--lon <degrees>] [--height <meters>]
 
 Defaults to New York City (40.71°N, 74.01°W).
 
+## Configuration
+
+Settings are saved automatically on quit and loaded on startup from:
+
+| Platform | Path |
+|----------|------|
+| Linux / macOS | `~/.config/stellui/config.toml` |
+| Windows | `%APPDATA%\stellui\config.toml` |
+
+CLI flags (`--lat`, `--lon`, `--height`) override the config file for that session.
+
+Example config (see `config.example.toml`):
+
+```toml
+lat = 40.71
+lon = -74.01
+height = 0.0
+# timezone = "America/New_York"  # auto-detected from lat/lon if omitted
+# max_mag = 5.5  # Faintest magnitude to display (0 = brightest, 8 = very faint)
+```
+
 ## Keybindings
 
 | Key | Action |

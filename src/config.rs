@@ -10,10 +10,23 @@ pub struct Config {
 }
 
 fn config_path() -> Option<std::path::PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    let mut p = std::path::PathBuf::from(home);
-    p.push(".config/stellui/config.toml");
+    let mut p = config_base_dir()?;
+    p.push("stellui");
+    p.push("config.toml");
     Some(p)
+}
+
+fn config_base_dir() -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "windows")]
+    return std::env::var_os("APPDATA").map(std::path::PathBuf::from);
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let home = std::env::var_os("HOME")?;
+        let mut p = std::path::PathBuf::from(home);
+        p.push(".config");
+        Some(p)
+    }
 }
 
 impl Config {

@@ -1,5 +1,7 @@
 # Stellui configuration file
-# Copy to ~/.config/stellui/config.toml
+# Copy to:
+#   Linux/macOS: ~/.config/stellui/config.toml
+#   Windows:     %APPDATA%\stellui\config.toml
 
 # Observer location
 lat = 40.71       # latitude in degrees  (-90 to 90,  N positive)

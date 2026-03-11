@@ -12,6 +12,34 @@ use ratatui::{
 use crate::app::{App, InputMode, Tab};
 use stellui::astro::CartesianCoordinates;
 
+fn planet_color(name: &str) -> Color {
+    match name {
+        "Mercury" => Color::Gray,
+        "Venus" => Color::Yellow,
+        "Mars" => Color::Red,
+        "Jupiter" => Color::White,
+        "Saturn" => Color::Yellow,
+        "Uranus" => Color::Cyan,
+        "Neptune" => Color::Blue,
+        _ => Color::White,
+    }
+}
+
+fn moon_phase_char(phase_angle: f64) -> &'static str {
+    // phase_angle: 0° = new moon, 180° = full moon
+    let frac = (1.0 - phase_angle.to_radians().cos()) / 2.0;
+    match (frac * 8.0) as u8 {
+        0 => "🌑",
+        1 => "🌒",
+        2 => "🌓",
+        3 => "🌔",
+        4 => "🌕",
+        5 => "🌖",
+        6 => "🌗",
+        _ => "🌘",
+    }
+}
+
 pub fn render(f: &mut Frame, app: &App) {
     let chunks = Layout::vertical([
         Constraint::Length(3),
@@ -80,19 +108,7 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let planet_positions: Vec<(&str, &str, f64, f64, ratatui::style::Color)> = app
         .planets
         .iter()
-        .map(|p| {
-            let color = match p.name {
-                "Mercury" => Color::Gray,
-                "Venus" => Color::Yellow,
-                "Mars" => Color::Red,
-                "Jupiter" => Color::White,
-                "Saturn" => Color::Yellow,
-                "Uranus" => Color::Cyan,
-                "Neptune" => Color::Blue,
-                _ => Color::White,
-            };
-            (p.name, p.symbol, p.x, p.y, color)
-        })
+        .map(|p| (p.name, p.symbol, p.x, p.y, planet_color(p.name)))
         .collect();
 
     let sun_pos = app.sun_moon.sun_stereo.as_ref().map(|p| {
@@ -104,7 +120,6 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         (c.x, c.y)
     });
     let phase_angle = app.sun_moon.moon_phase_angle;
-    let phase_pct = (1.0 - phase_angle.to_radians().cos()) / 2.0 * 100.0;
 
     let canvas_title = if test_mode {
         " Sky View (horizon circle, N=bottom) [ORION ONLY] "
@@ -162,9 +177,11 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 ctx.print(
                     mx,
                     my,
-                    Line::from(Span::styled("●", Style::default().fg(Color::White))),
+                    Line::from(Span::styled(
+                        moon_phase_char(phase_angle),
+                        Style::default().fg(Color::White),
+                    )),
                 );
-                ctx.print(mx + 0.12, my + 0.12, format!("{phase_pct:.0}%"));
             }
 
             for (_name, symbol, x, y, color) in &planet_positions {
@@ -216,19 +233,9 @@ fn render_info_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         text.push(Line::from("  none above horizon"));
     } else {
         for p in &app.planets {
-            let color = match p.name {
-                "Mercury" => Color::Gray,
-                "Venus" => Color::Yellow,
-                "Mars" => Color::Red,
-                "Jupiter" => Color::White,
-                "Saturn" => Color::Yellow,
-                "Uranus" => Color::Cyan,
-                "Neptune" => Color::Blue,
-                _ => Color::White,
-            };
             text.push(Line::from(Span::styled(
                 format!("  {} {} ({:.1})", p.symbol, p.name, p.mag),
-                Style::default().fg(color),
+                Style::default().fg(planet_color(p.name)),
             )));
         }
     }

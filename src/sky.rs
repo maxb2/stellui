@@ -1,5 +1,6 @@
 use astronomy_engine_bindings::{
-    Astronomy_Equator, Astronomy_Horizon, Astronomy_Illumination, astro_aberration_t_ABERRATION,
+    Astronomy_Ecliptic, Astronomy_Equator, Astronomy_HelioVector, Astronomy_Horizon,
+    Astronomy_Illumination, astro_aberration_t_ABERRATION, astro_body_t_BODY_EARTH,
     astro_body_t_BODY_JUPITER, astro_body_t_BODY_MARS, astro_body_t_BODY_MERCURY,
     astro_body_t_BODY_NEPTUNE, astro_body_t_BODY_SATURN, astro_body_t_BODY_URANUS,
     astro_body_t_BODY_VENUS, astro_equator_date_t_EQUATOR_OF_DATE, astro_observer_t,
@@ -142,6 +143,76 @@ pub fn compute_planets(
             })
         })
         .collect()
+}
+
+pub struct OrreryPlanet {
+    pub name: &'static str,
+    pub symbol: &'static str,
+    pub cx: f64,
+    pub cy: f64,
+    pub dist_au: f64,
+}
+
+pub struct OrreryInfo {
+    pub planets: Vec<OrreryPlanet>,
+}
+
+pub const PLANET_SEMI_MAJOR_AXES: &[(&str, f64)] = &[
+    ("Mercury", 0.387),
+    ("Venus", 0.723),
+    ("Earth", 1.000),
+    ("Mars", 1.524),
+    ("Jupiter", 5.203),
+    ("Saturn", 9.537),
+    ("Uranus", 19.191),
+    ("Neptune", 30.069),
+];
+
+pub fn orrery_scale(au: f64) -> f64 {
+    au.sqrt()
+}
+
+pub fn compute_orrery(datetime: DateTime<Utc>) -> OrreryInfo {
+    const BODIES: &[(&str, &str, i32)] = &[
+        ("Mercury", "☿", astro_body_t_BODY_MERCURY),
+        ("Venus", "♀", astro_body_t_BODY_VENUS),
+        ("Earth", "♁", astro_body_t_BODY_EARTH),
+        ("Mars", "♂", astro_body_t_BODY_MARS),
+        ("Jupiter", "♃", astro_body_t_BODY_JUPITER),
+        ("Saturn", "♄", astro_body_t_BODY_SATURN),
+        ("Uranus", "⛢", astro_body_t_BODY_URANUS),
+        ("Neptune", "♆", astro_body_t_BODY_NEPTUNE),
+    ];
+    let time = astro_time_from_datetime(datetime);
+    let planets = BODIES
+        .iter()
+        .filter_map(|&(name, symbol, body)| unsafe {
+            let helio = Astronomy_HelioVector(body, time);
+            if helio.status != astro_status_t_ASTRO_SUCCESS {
+                return None;
+            }
+            let ecl = Astronomy_Ecliptic(helio);
+            if ecl.status != astro_status_t_ASTRO_SUCCESS {
+                return None;
+            }
+            let raw_x = ecl.vec.x;
+            let raw_y = ecl.vec.y;
+            let r_au = (raw_x * raw_x + raw_y * raw_y).sqrt();
+            let scale = if r_au > 1e-9 {
+                orrery_scale(r_au) / r_au
+            } else {
+                0.0
+            };
+            Some(OrreryPlanet {
+                name,
+                symbol,
+                cx: raw_x * scale,
+                cy: raw_y * scale,
+                dist_au: r_au,
+            })
+        })
+        .collect();
+    OrreryInfo { planets }
 }
 
 pub fn compute_sun_moon(lat: f64, lon: f64, height: f64, datetime: DateTime<Utc>) -> SunMoonInfo {

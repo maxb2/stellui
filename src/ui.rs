@@ -10,6 +10,7 @@ use ratatui::{
 };
 
 use crate::app::{App, InputMode, Tab};
+use crate::sky;
 use stellui::astro::CartesianCoordinates;
 
 fn planet_color(name: &str) -> Color {
@@ -53,6 +54,7 @@ pub fn render(f: &mut Frame, app: &App) {
     match app.tab {
         Tab::Sky => render_sky(f, app, chunks[1]),
         Tab::Weather => render_weather(f, app, chunks[1]),
+        Tab::SolarSystem => render_solar_system(f, app, chunks[1]),
     }
 
     render_status(f, app, chunks[2]);
@@ -62,8 +64,9 @@ fn render_tabs(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let selected = match app.tab {
         Tab::Sky => 0,
         Tab::Weather => 1,
+        Tab::SolarSystem => 2,
     };
-    let tabs = Tabs::new(vec!["[S] Sky", "[W] Weather"])
+    let tabs = Tabs::new(vec!["[S] Sky", "[W] Weather", "[P] Solar System"])
         .select(selected)
         .block(Block::default().borders(Borders::ALL).title(" Stellui "))
         .highlight_style(
@@ -336,6 +339,106 @@ fn render_weather(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     f.render_widget(sparkline, chunks[1]);
 }
 
+fn orrery_planet_color(name: &str) -> Color {
+    match name {
+        "Mercury" => Color::Gray,
+        "Venus" => Color::Yellow,
+        "Earth" => Color::Cyan,
+        "Mars" => Color::Red,
+        "Jupiter" => Color::White,
+        "Saturn" => Color::Yellow,
+        "Uranus" => Color::Cyan,
+        "Neptune" => Color::Blue,
+        _ => Color::White,
+    }
+}
+
+fn render_solar_system(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let cols =
+        Layout::horizontal([Constraint::Percentage(80), Constraint::Percentage(20)]).split(area);
+    render_orrery_canvas(f, app, cols[0]);
+    render_orrery_info(f, app, cols[1]);
+}
+
+fn render_orrery_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let orbit_radii: Vec<f64> = sky::PLANET_SEMI_MAJOR_AXES
+        .iter()
+        .map(|&(_, sma)| sky::orrery_scale(sma))
+        .collect();
+    let planet_data: Vec<(f64, f64, &str, Color)> = app
+        .orrery
+        .planets
+        .iter()
+        .map(|p| (p.cx, p.cy, p.symbol, orrery_planet_color(p.name)))
+        .collect();
+
+    let canvas = Canvas::default()
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Solar System (top-down, sqrt AU scale) "),
+        )
+        .x_bounds([-6.2, 6.2])
+        .y_bounds([-6.2, 6.2])
+        .background_color(Color::Black)
+        .paint(move |ctx| {
+            for r in &orbit_radii {
+                ctx.draw(&Circle {
+                    x: 0.0,
+                    y: 0.0,
+                    radius: *r,
+                    color: Color::DarkGray,
+                });
+            }
+
+            ctx.print(
+                0.0,
+                0.0,
+                Line::from(Span::styled("☀", Style::default().fg(Color::Yellow))),
+            );
+
+            for (cx, cy, symbol, color) in &planet_data {
+                ctx.print(
+                    *cx,
+                    *cy,
+                    Line::from(Span::styled(*symbol, Style::default().fg(*color))),
+                );
+            }
+        });
+
+    f.render_widget(canvas, area);
+}
+
+fn render_orrery_info(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let mut text = vec![
+        Line::from(Span::styled(
+            " Solar System",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            " Scale: sqrt(AU)",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            " Planets",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+    ];
+
+    for p in &app.orrery.planets {
+        text.push(Line::from(Span::styled(
+            format!("  {} {} {:.2} AU", p.symbol, p.name, p.dist_au),
+            Style::default().fg(orrery_planet_color(p.name)),
+        )));
+    }
+
+    let para =
+        Paragraph::new(text).block(Block::default().borders(Borders::ALL).title(" Info "));
+    f.render_widget(para, area);
+}
+
 fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let dt_str = app.datetime.format("%Y-%m-%d %H:%M UTC").to_string();
     let live_str = if app.live_mode { " [LIVE]" } else { "" };
@@ -356,7 +459,7 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         editing_hint
     };
 
-    let line2 = " [L]lat [O]lon [T]time [Space]live [+/-]mag [D]orion [R]weather [S/W]tab [Q]quit";
+    let line2 = " [L]lat [O]lon [T]time [Space]live [+/-]mag [D]orion [R]weather [S/W/P]tab [Q]quit";
 
     let text = vec![Line::from(line1), Line::from(line2)];
     let para =

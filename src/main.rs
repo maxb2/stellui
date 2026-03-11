@@ -121,6 +121,9 @@ fn run(
                     KeyCode::Char('w') | KeyCode::Char('W') => {
                         app.tab = Tab::Weather;
                     }
+                    KeyCode::Char('p') | KeyCode::Char('P') => {
+                        app.tab = Tab::SolarSystem;
+                    }
                     KeyCode::Char('l') | KeyCode::Char('L') => {
                         app.input_mode = InputMode::EditingLat;
                         app.input_buf = format!("{:.6}", app.lat);

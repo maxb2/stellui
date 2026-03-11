@@ -5,12 +5,12 @@ use ratatui::{
     text::{Line, Span},
     widgets::{
         Block, Borders, Paragraph, Row, Sparkline, Table, TableState, Tabs,
-        canvas::{Canvas, Circle, Points},
+        canvas::{Canvas, Circle, Line as CanvasLine, Points},
     },
 };
 
 use crate::app::{App, InputMode, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab};
-use crate::sky;
+use crate::sky::{self, ALMANAC_STEPS};
 use stellui::astro::CartesianCoordinates;
 
 fn planet_color(name: &str) -> Color {
@@ -55,6 +55,7 @@ pub fn render(f: &mut Frame, app: &App) {
         Tab::Sky => render_sky(f, app, chunks[1]),
         Tab::Weather => render_weather(f, app, chunks[1]),
         Tab::SolarSystem => render_solar_system(f, app, chunks[1]),
+        Tab::Almanac => render_almanac(f, app, chunks[1]),
     }
 
     render_status(f, app, chunks[2]);
@@ -65,8 +66,9 @@ fn render_tabs(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Tab::Sky => 0,
         Tab::Weather => 1,
         Tab::SolarSystem => 2,
+        Tab::Almanac => 3,
     };
-    let tabs = Tabs::new(vec!["[S] Sky", "[W] Weather", "[P] Solar System"])
+    let tabs = Tabs::new(vec!["[S] Sky", "[W] Weather", "[P] Solar System", "[A] Almanac"])
         .select(selected)
         .block(Block::default().borders(Borders::ALL).title(" Stellui "))
         .highlight_style(
@@ -447,7 +449,7 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         " [PAUSED]".to_string()
     } else {
         let label = match app.tab {
-            Tab::Sky | Tab::Weather => SKY_SPEED_PRESETS[app.sky_speed_index].1,
+            Tab::Sky | Tab::Weather | Tab::Almanac => SKY_SPEED_PRESETS[app.sky_speed_index].1,
             Tab::SolarSystem => ORRERY_SPEED_PRESETS[app.orrery_speed_index].1,
         };
         format!(" [{}]", label)
@@ -471,15 +473,183 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let line2 = match app.tab {
         Tab::Sky =>
-            " [L]lat [O]lon [T]time [N]now [Space]pause [,/.]speed [+/-]mag [D]orion [S/W/P]tab [Q]quit",
+            " [L]lat [O]lon [T]time [N]now [Space]pause [,/.]speed [+/-]mag [D]orion [S/W/P/A]tab [Q]quit",
         Tab::Weather =>
-            " [L]lat [O]lon [R]weather [↑/↓]scroll [S/W/P]tab [Q]quit",
+            " [L]lat [O]lon [R]weather [↑/↓]scroll [S/W/P/A]tab [Q]quit",
         Tab::SolarSystem =>
-            " [L]lat [O]lon [T]time [N]now [Space]pause [,/.]speed [S/W/P]tab [Q]quit",
+            " [L]lat [O]lon [T]time [N]now [Space]pause [,/.]speed [S/W/P/A]tab [Q]quit",
+        Tab::Almanac =>
+            " [L]lat [O]lon [T]time [N]now [Space]pause [,/.]speed [S/W/P/A]tab [Q]quit",
     };
 
     let text = vec![Line::from(line1), Line::from(line2)];
     let para =
         Paragraph::new(text).block(Block::default().borders(Borders::TOP).title(" Controls "));
+    f.render_widget(para, area);
+}
+
+fn render_almanac(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let cols =
+        Layout::horizontal([Constraint::Percentage(75), Constraint::Percentage(25)]).split(area);
+    render_almanac_canvas(f, app, cols[0]);
+    render_almanac_legend(f, app, cols[1]);
+}
+
+fn render_almanac_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    use std::f64::consts::PI;
+
+    let almanac = &app.almanac;
+    let current_step = almanac.current_step;
+
+    // Pre-compute arc segments: Vec<(x1, y1, x2, y2, r, g, b)>
+    let mut segments: Vec<(f64, f64, f64, f64, u8, u8, u8)> = Vec::new();
+    for track in &almanac.tracks {
+        let (base_r, base_g, base_b) = track.color_rgb;
+        for k in 0..96usize {
+            let idx0 = (current_step + k) % ALMANAC_STEPS;
+            let idx1 = (current_step + k + 1) % ALMANAC_STEPS;
+            let alt0 = track.altitudes[idx0];
+            let alt1 = track.altitudes[idx1];
+            if alt0 <= 0.0 && alt1 <= 0.0 {
+                continue;
+            }
+            let r0 = alt0.max(0.0) / 90.0;
+            let r1 = alt1.max(0.0) / 90.0;
+            let h0 = idx0 as f64 * 15.0 / 60.0;
+            let h1 = idx1 as f64 * 15.0 / 60.0;
+            let angle0 = 2.0 * PI * h0 / 24.0;
+            let angle1 = 2.0 * PI * h1 / 24.0;
+            let x0 = angle0.sin() * r0;
+            let y0 = angle0.cos() * r0;
+            let x1 = angle1.sin() * r1;
+            let y1 = angle1.cos() * r1;
+            // Stay fully opaque for first 3/4 of the day, smoothstep fade in last quarter
+            let fade = if k < 72 {
+                1.0
+            } else {
+                let u = (k - 72) as f64 / 24.0; // 0..1 over last 6h
+                1.0 - u * u * (3.0 - 2.0 * u)  // smoothstep
+            };
+            let cr = (base_r as f64 * fade) as u8;
+            let cg = (base_g as f64 * fade) as u8;
+            let cb = (base_b as f64 * fade) as u8;
+            segments.push((x0, y0, x1, y1, cr, cg, cb));
+        }
+    }
+
+    // Clock hand endpoint
+    let hand_h = current_step as f64 * 15.0 / 60.0;
+    let hand_angle = 2.0 * PI * hand_h / 24.0;
+    let hand_x = hand_angle.sin();
+    let hand_y = hand_angle.cos();
+
+    let canvas = Canvas::default()
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Almanac — 24h Altitude (midnight top, clockwise) "),
+        )
+        .x_bounds([-1.3, 1.3])
+        .y_bounds([-1.3, 1.3])
+        .background_color(Color::Black)
+        .paint(move |ctx| {
+            // Reference altitude circles at 30°, 60°, 90°
+            for &r in &[1.0 / 3.0, 2.0 / 3.0, 1.0] {
+                ctx.draw(&Circle {
+                    x: 0.0,
+                    y: 0.0,
+                    radius: r,
+                    color: Color::DarkGray,
+                });
+            }
+
+            // Hour tick lines and labels
+            use std::f64::consts::PI;
+            for h in 0..24u32 {
+                let angle = 2.0 * PI * h as f64 / 24.0;
+                let sin_a = angle.sin();
+                let cos_a = angle.cos();
+                let inner = 0.92;
+                ctx.draw(&CanvasLine {
+                    x1: sin_a * inner,
+                    y1: cos_a * inner,
+                    x2: sin_a,
+                    y2: cos_a,
+                    color: Color::DarkGray,
+                });
+            }
+            // Hour labels at 0, 6, 12, 18
+            ctx.print(0.0, 1.12, "0h");
+            ctx.print(1.08, 0.0, "6h");
+            ctx.print(0.0, -1.12, "12h");
+            ctx.print(-1.15, 0.0, "18h");
+
+            // Altitude labels
+            ctx.print(0.02, 1.0 / 3.0, "30°");
+            ctx.print(0.02, 2.0 / 3.0, "60°");
+            ctx.print(0.02, 0.97, "90°");
+
+            // Body arcs
+            for &(x0, y0, x1, y1, cr, cg, cb) in &segments {
+                ctx.draw(&CanvasLine {
+                    x1: x0,
+                    y1: y0,
+                    x2: x1,
+                    y2: y1,
+                    color: Color::Rgb(cr, cg, cb),
+                });
+            }
+
+            // Clock hand
+            ctx.draw(&CanvasLine {
+                x1: 0.0,
+                y1: 0.0,
+                x2: hand_x,
+                y2: hand_y,
+                color: Color::White,
+            });
+        });
+
+    f.render_widget(canvas, area);
+}
+
+fn render_almanac_legend(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let mut text = vec![
+        Line::from(Span::styled(
+            " Almanac",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            " midnight=top, clockwise",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::styled(
+            " arcs = next 24h",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            " Body  Alt",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+    ];
+
+    for track in &app.almanac.tracks {
+        let alt = track.altitudes[app.almanac.current_step];
+        let (r, g, b) = track.color_rgb;
+        let label = if alt > 0.0 {
+            format!(" {} {} {:.1}°", track.symbol, track.name, alt)
+        } else {
+            format!(" {} {} below", track.symbol, track.name)
+        };
+        text.push(Line::from(Span::styled(
+            label,
+            Style::default().fg(Color::Rgb(r, g, b)),
+        )));
+    }
+
+    let para =
+        Paragraph::new(text).block(Block::default().borders(Borders::ALL).title(" Legend "));
     f.render_widget(para, area);
 }

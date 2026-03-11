@@ -106,7 +106,7 @@ fn run(
             app.recompute();
         } else if !app.time_paused {
             let speed = match app.tab {
-                Tab::Sky | Tab::Weather => SKY_SPEED_PRESETS[app.sky_speed_index].0,
+                Tab::Sky | Tab::Weather | Tab::Almanac => SKY_SPEED_PRESETS[app.sky_speed_index].0,
                 Tab::SolarSystem => ORRERY_SPEED_PRESETS[app.orrery_speed_index].0,
             };
             let sim_nanos = (speed as f64 * elapsed_wall.as_secs_f64() * 1_000_000_000.0) as i64;
@@ -135,6 +135,10 @@ fn run(
                     }
                     KeyCode::Char('p') | KeyCode::Char('P') => {
                         app.tab = Tab::SolarSystem;
+                    }
+                    KeyCode::Char('a') | KeyCode::Char('A') => {
+                        app.tab = Tab::Almanac;
+                        app.almanac = sky::compute_almanac(app.lat, app.lon, app.height, app.datetime);
                     }
                     KeyCode::Char('l') | KeyCode::Char('L') => {
                         app.input_mode = InputMode::EditingLat;
@@ -165,7 +169,7 @@ fn run(
                     }
                     KeyCode::Char(',') => {
                         match app.tab {
-                            Tab::Sky | Tab::Weather => {
+                            Tab::Sky | Tab::Weather | Tab::Almanac => {
                                 if app.sky_speed_index > 0 { app.sky_speed_index -= 1; }
                             }
                             Tab::SolarSystem => {
@@ -177,7 +181,7 @@ fn run(
                     }
                     KeyCode::Char('.') => {
                         match app.tab {
-                            Tab::Sky | Tab::Weather => {
+                            Tab::Sky | Tab::Weather | Tab::Almanac => {
                                 if app.sky_speed_index + 1 < SKY_SPEED_PRESETS.len() { app.sky_speed_index += 1; }
                             }
                             Tab::SolarSystem => {

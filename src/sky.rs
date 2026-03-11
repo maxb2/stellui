@@ -2,11 +2,12 @@ use astronomy_engine_bindings::{
     Astronomy_Ecliptic, Astronomy_Equator, Astronomy_HelioVector, Astronomy_Horizon,
     Astronomy_Illumination, astro_aberration_t_ABERRATION, astro_body_t_BODY_EARTH,
     astro_body_t_BODY_JUPITER, astro_body_t_BODY_MARS, astro_body_t_BODY_MERCURY,
-    astro_body_t_BODY_NEPTUNE, astro_body_t_BODY_SATURN, astro_body_t_BODY_URANUS,
-    astro_body_t_BODY_VENUS, astro_equator_date_t_EQUATOR_OF_DATE, astro_observer_t,
-    astro_refraction_t_REFRACTION_NORMAL, astro_status_t_ASTRO_SUCCESS,
+    astro_body_t_BODY_MOON, astro_body_t_BODY_NEPTUNE, astro_body_t_BODY_SATURN,
+    astro_body_t_BODY_SUN, astro_body_t_BODY_URANUS, astro_body_t_BODY_VENUS,
+    astro_equator_date_t_EQUATOR_OF_DATE, astro_observer_t, astro_refraction_t_REFRACTION_NORMAL,
+    astro_status_t_ASTRO_SUCCESS,
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use stellui::astro::{
     CartesianCoordinates, PolarCoordinates, SunMoonProjection, astro_time_from_datetime,
     hor_to_stereo, star_stereo,
@@ -213,6 +214,72 @@ pub fn compute_orrery(datetime: DateTime<Utc>) -> OrreryInfo {
         })
         .collect();
     OrreryInfo { planets }
+}
+
+pub const ALMANAC_STEPS: usize = 96; // 15-min intervals over 24h
+
+pub struct AlmanacTrack {
+    pub name: &'static str,
+    pub symbol: &'static str,
+    pub color_rgb: (u8, u8, u8),
+    /// altitude in degrees (-90..90) for each step; index 0 = UTC midnight
+    pub altitudes: [f64; ALMANAC_STEPS],
+}
+
+pub struct AlmanacInfo {
+    pub tracks: Vec<AlmanacTrack>,
+    /// Step index corresponding to app.datetime (0..ALMANAC_STEPS)
+    pub current_step: usize,
+}
+
+pub fn compute_almanac(lat: f64, lon: f64, height: f64, datetime: DateTime<Utc>) -> AlmanacInfo {
+    const BODIES: &[(&str, &str, i32, (u8, u8, u8))] = &[
+        ("Sun",     "☀",  astro_body_t_BODY_SUN,     (255, 220,  50)),
+        ("Moon",    "☽",  astro_body_t_BODY_MOON,    (200, 200, 200)),
+        ("Mercury", "☿",  astro_body_t_BODY_MERCURY, (180, 180, 180)),
+        ("Venus",   "♀",  astro_body_t_BODY_VENUS,   (230, 220, 100)),
+        ("Mars",    "♂",  astro_body_t_BODY_MARS,    (220,  80,  60)),
+        ("Jupiter", "♃",  astro_body_t_BODY_JUPITER, (240, 200, 150)),
+        ("Saturn",  "♄",  astro_body_t_BODY_SATURN,  (200, 180, 100)),
+        ("Uranus",  "⛢",  astro_body_t_BODY_URANUS,  (100, 220, 220)),
+        ("Neptune", "♆",  astro_body_t_BODY_NEPTUNE, ( 80, 120, 220)),
+    ];
+    let observer = astro_observer_t { latitude: lat, longitude: lon, height };
+    let day_start = datetime.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
+    let current_step = ((datetime - day_start).num_minutes().max(0) as usize / 15)
+        .min(ALMANAC_STEPS - 1);
+
+    let tracks = BODIES.iter().map(|&(name, symbol, body, color_rgb)| {
+        let mut altitudes = [0f64; ALMANAC_STEPS];
+        for (i, alt) in altitudes.iter_mut().enumerate() {
+            let step_dt = day_start + Duration::minutes(i as i64 * 15);
+            let mut time = astro_time_from_datetime(step_dt);
+            *alt = unsafe {
+                let eq = Astronomy_Equator(
+                    body,
+                    &mut time as *mut _,
+                    observer,
+                    astro_equator_date_t_EQUATOR_OF_DATE,
+                    astro_aberration_t_ABERRATION,
+                );
+                if eq.status != astro_status_t_ASTRO_SUCCESS {
+                    -90.0
+                } else {
+                    let hor = Astronomy_Horizon(
+                        &mut time as *mut _,
+                        observer,
+                        eq.ra,
+                        eq.dec,
+                        astro_refraction_t_REFRACTION_NORMAL,
+                    );
+                    hor.altitude
+                }
+            };
+        }
+        AlmanacTrack { name, symbol, color_rgb, altitudes }
+    }).collect();
+
+    AlmanacInfo { tracks, current_step }
 }
 
 pub fn compute_sun_moon(lat: f64, lon: f64, height: f64, datetime: DateTime<Utc>) -> SunMoonInfo {

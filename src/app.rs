@@ -1,11 +1,12 @@
 use chrono::{DateTime, Utc};
 
-use crate::sky::{self, RenderedPlanet, RenderedStar, SunMoonInfo};
+use crate::sky::{self, OrreryInfo, RenderedPlanet, RenderedStar, SunMoonInfo};
 use crate::weather::HourlyForecast;
 
 pub enum Tab {
     Sky,
     Weather,
+    SolarSystem,
 }
 
 pub enum InputMode {
@@ -31,6 +32,7 @@ pub struct App {
     pub stars: Vec<RenderedStar>,
     pub sun_moon: SunMoonInfo,
     pub planets: Vec<RenderedPlanet>,
+    pub orrery: OrreryInfo,
 
     pub forecasts: Option<Vec<HourlyForecast>>,
     pub weather_loading: bool,
@@ -53,6 +55,7 @@ impl App {
             test_mode: false,
             stars: Vec::new(),
             planets: Vec::new(),
+            orrery: OrreryInfo { planets: Vec::new() },
             sun_moon: SunMoonInfo {
                 sun_stereo: None,
                 moon_stereo: None,
@@ -78,5 +81,6 @@ impl App {
         );
         self.sun_moon = sky::compute_sun_moon(self.lat, self.lon, self.height, self.datetime);
         self.planets = sky::compute_planets(self.lat, self.lon, self.height, self.datetime);
+        self.orrery = sky::compute_orrery(self.datetime);
     }
 }

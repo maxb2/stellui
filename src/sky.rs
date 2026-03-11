@@ -7,7 +7,7 @@ use astronomy_engine_bindings::{
     astro_equator_date_t_EQUATOR_OF_DATE, astro_observer_t, astro_refraction_t_REFRACTION_NORMAL,
     astro_status_t_ASTRO_SUCCESS,
 };
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, TimeZone, Utc};
 use stellui::astro::{
     CartesianCoordinates, PolarCoordinates, SunMoonProjection, astro_time_from_datetime,
     hor_to_stereo, star_stereo,
@@ -234,7 +234,7 @@ pub struct AlmanacInfo {
 
 type BodySpec = (&'static str, &'static str, i32, (u8, u8, u8));
 
-pub fn compute_almanac(lat: f64, lon: f64, height: f64, datetime: DateTime<Utc>) -> AlmanacInfo {
+pub fn compute_almanac(lat: f64, lon: f64, height: f64, datetime: DateTime<Utc>, tz: Option<chrono_tz::Tz>) -> AlmanacInfo {
     const BODIES: &[BodySpec] = &[
         ("Sun",     "☀",  astro_body_t_BODY_SUN,     (255, 220,  50)),
         ("Moon",    "☽",  astro_body_t_BODY_MOON,    (200, 200, 200)),
@@ -247,9 +247,22 @@ pub fn compute_almanac(lat: f64, lon: f64, height: f64, datetime: DateTime<Utc>)
         ("Neptune", "♆",  astro_body_t_BODY_NEPTUNE, ( 80, 120, 220)),
     ];
     let observer = astro_observer_t { latitude: lat, longitude: lon, height };
-    let day_start = datetime.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
-    let current_step = ((datetime - day_start).num_minutes().max(0) as usize / 15)
-        .min(ALMANAC_STEPS - 1);
+    let (day_start, current_step) = match tz {
+        Some(tz) => {
+            let local_now = datetime.with_timezone(&tz);
+            let midnight_naive = local_now.date_naive().and_hms_opt(0, 0, 0).unwrap();
+            let day_start = tz.from_local_datetime(&midnight_naive).unwrap().to_utc();
+            let step = ((datetime - day_start).num_minutes().max(0) as usize / 15)
+                .min(ALMANAC_STEPS - 1);
+            (day_start, step)
+        }
+        None => {
+            let day_start = datetime.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
+            let step = ((datetime - day_start).num_minutes().max(0) as usize / 15)
+                .min(ALMANAC_STEPS - 1);
+            (day_start, step)
+        }
+    };
 
     let tracks = BODIES.iter().map(|&(name, symbol, body, color_rgb)| {
         let mut altitudes = [0f64; ALMANAC_STEPS];

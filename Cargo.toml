@@ -17,3 +17,5 @@ crossterm = "0.28"
 ureq = { version = "2", features = ["json"] }
 serde_json = "1"
 anyhow = "1"
+tzf-rs = "0.4"
+chrono-tz = "0.10"

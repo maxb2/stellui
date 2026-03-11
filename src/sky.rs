@@ -29,7 +29,7 @@ pub struct RenderedPlanet {
 pub struct SunMoonInfo {
     pub sun_stereo: Option<PolarCoordinates>,
     pub moon_stereo: Option<PolarCoordinates>,
-    pub moon_phase_angle: f64,
+    pub moon_cycle_degrees: f64,
 }
 
 pub fn compute_stars(
@@ -80,13 +80,13 @@ pub fn compute_planets(
     datetime: DateTime<Utc>,
 ) -> Vec<RenderedPlanet> {
     const PLANETS: &[(&str, &str, i32)] = &[
-        ("Mercury", "☿", astro_body_t_BODY_MERCURY),
-        ("Venus", "♀", astro_body_t_BODY_VENUS),
-        ("Mars", "♂", astro_body_t_BODY_MARS),
-        ("Jupiter", "♃", astro_body_t_BODY_JUPITER),
-        ("Saturn", "♄", astro_body_t_BODY_SATURN),
-        ("Uranus", "⛢", astro_body_t_BODY_URANUS),
-        ("Neptune", "♆", astro_body_t_BODY_NEPTUNE),
+        ("Mercury", "⚪☿", astro_body_t_BODY_MERCURY),
+        ("Venus", "🟡♀", astro_body_t_BODY_VENUS),
+        ("Mars", "🔴♂", astro_body_t_BODY_MARS),
+        ("Jupiter", "🟠♃", astro_body_t_BODY_JUPITER),
+        ("Saturn", "🪐♄", astro_body_t_BODY_SATURN),
+        ("Uranus", "🔵⛢", astro_body_t_BODY_URANUS),
+        ("Neptune", "🔵♆", astro_body_t_BODY_NEPTUNE),
     ];
 
     let observer = astro_observer_t {
@@ -161,6 +161,6 @@ pub fn compute_sun_moon(lat: f64, lon: f64, height: f64, datetime: DateTime<Utc>
     SunMoonInfo {
         sun_stereo: to_opt(&smp.sun_hor),
         moon_stereo: to_opt(&smp.moon_hor),
-        moon_phase_angle: smp.moon_phase_angle,
+        moon_cycle_degrees: smp.moon_cycle_degrees,
     }
 }

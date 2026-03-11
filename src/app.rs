@@ -56,7 +56,7 @@ impl App {
             sun_moon: SunMoonInfo {
                 sun_stereo: None,
                 moon_stereo: None,
-                moon_phase_angle: 0.0,
+                moon_cycle_degrees: 0.0,
             },
             forecasts: None,
             weather_loading: false,

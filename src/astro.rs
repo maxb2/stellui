@@ -6,11 +6,11 @@
 
 use crate::catalog;
 use astronomy_engine_bindings::{
-    Astronomy_DefineStar, Astronomy_Equator, Astronomy_Horizon, Astronomy_Illumination,
-    Astronomy_MakeTime, astro_aberration_t_ABERRATION, astro_aberration_t_NO_ABERRATION,
+    Astronomy_DefineStar, Astronomy_Equator, Astronomy_Horizon, Astronomy_MakeTime,
+    Astronomy_MoonPhase, astro_aberration_t_ABERRATION, astro_aberration_t_NO_ABERRATION,
     astro_body_t_BODY_MOON, astro_body_t_BODY_STAR1, astro_body_t_BODY_SUN,
-    astro_equator_date_t_EQUATOR_OF_DATE, astro_equatorial_t, astro_horizon_t, astro_illum_t,
-    astro_observer_t, astro_refraction_t_REFRACTION_NONE, astro_refraction_t_REFRACTION_NORMAL,
+    astro_equator_date_t_EQUATOR_OF_DATE, astro_equatorial_t, astro_horizon_t, astro_observer_t,
+    astro_refraction_t_REFRACTION_NONE, astro_refraction_t_REFRACTION_NORMAL,
     astro_status_t_ASTRO_SUCCESS, astro_time_t,
 };
 use chrono::{DateTime, Datelike, Timelike, Utc};
@@ -253,15 +253,15 @@ pub fn astro_time_from_datetime(datetime: DateTime<Utc>) -> astro_time_t {
     }
 }
 
-/// Horizon positions of the Sun and Moon, plus the Moon's phase angle.
+/// Horizon positions of the Sun and Moon, plus the Moon's cycle position.
 #[derive(Debug)]
 pub struct SunMoonProjection {
     /// Horizon coordinates (altitude, azimuth in degrees) of the Sun.
     pub sun_hor: astro_horizon_t,
     /// Horizon coordinates (altitude, azimuth in degrees) of the Moon.
     pub moon_hor: astro_horizon_t,
-    /// Moon phase angle in degrees (0° = new moon, 180° = full moon).
-    pub moon_phase_angle: f64,
+    /// Moon cycle position in degrees (0° = new moon, 90° = first quarter, 180° = full moon, 270° = last quarter).
+    pub moon_cycle_degrees: f64,
 }
 
 impl SunMoonProjection {
@@ -306,21 +306,19 @@ impl SunMoonProjection {
             );
         }
 
-        let illum: astro_illum_t;
+        let moon_cycle_degrees: f64;
         unsafe {
-            illum = Astronomy_Illumination(astro_body_t_BODY_MOON, *time);
-            if illum.status != astro_status_t_ASTRO_SUCCESS {
-                panic!(
-                    "Error {} trying to calculate Moon illumination.\n",
-                    illum.status
-                );
+            let phase = Astronomy_MoonPhase(*time);
+            if phase.status != astro_status_t_ASTRO_SUCCESS {
+                panic!("Error {} trying to calculate Moon phase.\n", phase.status);
             }
+            moon_cycle_degrees = phase.angle;
         }
 
         Self {
             sun_hor,
             moon_hor,
-            moon_phase_angle: illum.phase_angle,
+            moon_cycle_degrees,
         }
     }
 }
@@ -346,21 +344,33 @@ mod tests {
     fn hor_to_stereo_zenith() {
         let hz = make_hz(90.0, 0.0);
         let p = hor_to_stereo(&hz);
-        assert!(p.rad.abs() < 1e-10, "zenith rad should be ~0, got {}", p.rad);
+        assert!(
+            p.rad.abs() < 1e-10,
+            "zenith rad should be ~0, got {}",
+            p.rad
+        );
     }
 
     #[test]
     fn hor_to_stereo_horizon() {
         let hz = make_hz(0.0, 0.0);
         let p = hor_to_stereo(&hz);
-        assert!((p.rad - 2.0).abs() < 1e-10, "horizon rad should be 2.0, got {}", p.rad);
+        assert!(
+            (p.rad - 2.0).abs() < 1e-10,
+            "horizon rad should be 2.0, got {}",
+            p.rad
+        );
     }
 
     #[test]
     fn hor_to_stereo_below_horizon() {
         let hz = make_hz(-10.0, 0.0);
         let p = hor_to_stereo(&hz);
-        assert!(p.rad > 2.0, "below-horizon rad should be >2.0, got {}", p.rad);
+        assert!(
+            p.rad > 2.0,
+            "below-horizon rad should be >2.0, got {}",
+            p.rad
+        );
     }
 
     #[test]
@@ -374,14 +384,20 @@ mod tests {
 
     #[test]
     fn canvas_orient_shifts_phi() {
-        let p = PolarCoordinates { rad: 1.0, phi: 100.0 };
+        let p = PolarCoordinates {
+            rad: 1.0,
+            phi: 100.0,
+        };
         let oriented = p.canvas_orient();
         assert_eq!(oriented.phi, 10.0);
     }
 
     #[test]
     fn mut_canvas_orient_shifts_phi() {
-        let mut p = PolarCoordinates { rad: 1.0, phi: 100.0 };
+        let mut p = PolarCoordinates {
+            rad: 1.0,
+            phi: 100.0,
+        };
         p.mut_canvas_orient();
         assert_eq!(p.phi, 10.0);
     }
@@ -390,7 +406,10 @@ mod tests {
 
     #[test]
     fn rot_adds_angle() {
-        let p = PolarCoordinates { rad: 1.0, phi: 10.0 };
+        let p = PolarCoordinates {
+            rad: 1.0,
+            phi: 10.0,
+        };
         let rotated = p.rot(45.0);
         assert_eq!(rotated.phi, 55.0);
     }
@@ -399,7 +418,10 @@ mod tests {
 
     #[test]
     fn polar_mul_positive() {
-        let p = PolarCoordinates { rad: 2.0, phi: 30.0 };
+        let p = PolarCoordinates {
+            rad: 2.0,
+            phi: 30.0,
+        };
         let scaled = p * 3.0;
         assert_eq!(scaled.rad, 6.0);
         assert_eq!(scaled.phi, 30.0);
@@ -407,7 +429,10 @@ mod tests {
 
     #[test]
     fn polar_mul_negative() {
-        let p = PolarCoordinates { rad: 2.0, phi: 30.0 };
+        let p = PolarCoordinates {
+            rad: 2.0,
+            phi: 30.0,
+        };
         let scaled = p * -1.0;
         assert_eq!(scaled.rad, 2.0);
         assert_eq!(scaled.phi, 210.0);
@@ -435,7 +460,10 @@ mod tests {
     #[test]
     fn cartesian_from_polar_east() {
         // phi=90° → x≈0, y=rad
-        let p = PolarCoordinates { rad: 1.0, phi: 90.0 };
+        let p = PolarCoordinates {
+            rad: 1.0,
+            phi: 90.0,
+        };
         let c = CartesianCoordinates::from(p);
         assert!(c.x.abs() < 1e-10, "x={}", c.x);
         assert!((c.y - 1.0).abs() < 1e-10, "y={}", c.y);
@@ -443,8 +471,16 @@ mod tests {
 
     #[test]
     fn cartesian_add() {
-        let a = CartesianCoordinates { x: 1.0, y: 2.0, z: 0.0 };
-        let b = CartesianCoordinates { x: 3.0, y: 4.0, z: 0.0 };
+        let a = CartesianCoordinates {
+            x: 1.0,
+            y: 2.0,
+            z: 0.0,
+        };
+        let b = CartesianCoordinates {
+            x: 3.0,
+            y: 4.0,
+            z: 0.0,
+        };
         let sum = a + b;
         assert_eq!(sum.x, 4.0);
         assert_eq!(sum.y, 6.0);
@@ -452,8 +488,16 @@ mod tests {
 
     #[test]
     fn cartesian_sub() {
-        let a = CartesianCoordinates { x: 5.0, y: 7.0, z: 0.0 };
-        let b = CartesianCoordinates { x: 2.0, y: 3.0, z: 0.0 };
+        let a = CartesianCoordinates {
+            x: 5.0,
+            y: 7.0,
+            z: 0.0,
+        };
+        let b = CartesianCoordinates {
+            x: 2.0,
+            y: 3.0,
+            z: 0.0,
+        };
         let diff = a - b;
         assert_eq!(diff.x, 3.0);
         assert_eq!(diff.y, 4.0);
@@ -494,8 +538,16 @@ mod tests {
         let polar = result.expect("Polaris projection should succeed");
 
         // Polaris is always above the horizon from NYC
-        assert!(polar.rad < 2.0, "Polaris rad={} should be <2.0 (above horizon)", polar.rad);
+        assert!(
+            polar.rad < 2.0,
+            "Polaris rad={} should be <2.0 (above horizon)",
+            polar.rad
+        );
         // phi should be a valid azimuth
-        assert!(polar.phi >= 0.0 && polar.phi < 360.0, "phi={} out of range", polar.phi);
+        assert!(
+            polar.phi >= 0.0 && polar.phi < 360.0,
+            "phi={} out of range",
+            polar.phi
+        );
     }
 }

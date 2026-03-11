@@ -54623,6 +54623,10 @@ mod tests {
 
     #[test]
     fn catalog_dec_in_degrees_range() {
-        assert!(J2000_CATALOG.iter().all(|s| s.dec >= -90.0 && s.dec <= 90.0));
+        assert!(
+            J2000_CATALOG
+                .iter()
+                .all(|s| s.dec >= -90.0 && s.dec <= 90.0)
+        );
     }
 }

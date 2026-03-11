@@ -25,10 +25,9 @@ fn planet_color(name: &str) -> Color {
     }
 }
 
-fn moon_phase_char(phase_angle: f64) -> &'static str {
-    // phase_angle: 0° = new moon, 180° = full moon
-    let frac = (1.0 - phase_angle.to_radians().cos()) / 2.0;
-    match (frac * 8.0) as u8 {
+fn moon_phase_char(cycle_degrees: f64) -> &'static str {
+    // cycle_degrees: 0° = new moon, 90° = first quarter, 180° = full moon, 270° = last quarter
+    match (cycle_degrees / 45.0) as u8 {
         0 => "🌑",
         1 => "🌒",
         2 => "🌓",
@@ -36,7 +35,8 @@ fn moon_phase_char(phase_angle: f64) -> &'static str {
         4 => "🌕",
         5 => "🌖",
         6 => "🌗",
-        _ => "🌘",
+        7 => "🌘",
+        _ => "🌑",
     }
 }
 
@@ -119,7 +119,7 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         let c = CartesianCoordinates::from(p);
         (c.x, c.y)
     });
-    let phase_angle = app.sun_moon.moon_phase_angle;
+    let phase_angle = app.sun_moon.moon_cycle_degrees;
 
     let canvas_title = if test_mode {
         " Sky View (horizon circle, N=bottom) [ORION ONLY] "
@@ -169,7 +169,7 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 ctx.print(
                     sx,
                     sy,
-                    Line::from(Span::styled("☀", Style::default().fg(Color::Yellow))),
+                    Line::from(Span::styled("🌞", Style::default().fg(Color::Yellow))),
                 );
             }
 
@@ -205,7 +205,7 @@ fn render_info_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Some(_) => "Above horizon",
         None => "Below horizon",
     };
-    let phase_pct = (1.0 - app.sun_moon.moon_phase_angle.to_radians().cos()) / 2.0 * 100.0;
+    let phase_pct = (1.0 - app.sun_moon.moon_cycle_degrees.to_radians().cos()) / 2.0 * 100.0;
 
     let mut text = vec![
         Line::from(Span::styled(
@@ -222,7 +222,7 @@ fn render_info_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Line::from(Span::styled(" Moon", Style::default().fg(Color::White))),
         Line::from(format!("  {moon_status}")),
         Line::from(format!("  Phase: {phase_pct:.0}%")),
-        Line::from(format!("  Angle: {:.1}°", app.sun_moon.moon_phase_angle)),
+        Line::from(format!("  Cycle: {:.1}°", app.sun_moon.moon_cycle_degrees)),
         Line::from(""),
         Line::from(Span::styled(
             " Planets",

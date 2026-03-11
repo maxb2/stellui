@@ -5,7 +5,7 @@ mod weather;
 
 use std::io::stdout;
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use chrono::{DateTime, NaiveDateTime, Utc};
@@ -16,7 +16,7 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use app::{App, InputMode, Tab};
+use app::{App, InputMode, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab};
 use weather::HourlyForecast;
 
 fn main() -> Result<()> {
@@ -96,9 +96,21 @@ fn run(
             }
         }
 
-        // Update live mode
+        // Update time
+        let now = Instant::now();
+        let elapsed_wall = now.duration_since(app.last_tick);
+        app.last_tick = now;
+
         if app.live_mode {
             app.datetime = Utc::now();
+            app.recompute();
+        } else if !app.time_paused {
+            let speed = match app.tab {
+                Tab::Sky | Tab::Weather => SKY_SPEED_PRESETS[app.sky_speed_index].0,
+                Tab::SolarSystem => ORRERY_SPEED_PRESETS[app.orrery_speed_index].0,
+            };
+            let sim_nanos = (speed as f64 * elapsed_wall.as_secs_f64() * 1_000_000_000.0) as i64;
+            app.datetime += chrono::Duration::nanoseconds(sim_nanos);
             app.recompute();
         }
 
@@ -137,11 +149,43 @@ fn run(
                         app.input_buf = app.datetime.format("%Y-%m-%d %H:%M").to_string();
                     }
                     KeyCode::Char(' ') => {
-                        app.live_mode = !app.live_mode;
-                        if app.live_mode {
-                            app.datetime = Utc::now();
-                            app.recompute();
+                        if !app.live_mode {
+                            app.time_paused = !app.time_paused;
+                            if !app.time_paused {
+                                app.last_tick = Instant::now();
+                            }
                         }
+                    }
+                    KeyCode::Char('n') | KeyCode::Char('N') => {
+                        app.live_mode = true;
+                        app.time_paused = false;
+                        app.datetime = Utc::now();
+                        app.last_tick = Instant::now();
+                        app.recompute();
+                    }
+                    KeyCode::Char(',') => {
+                        match app.tab {
+                            Tab::Sky | Tab::Weather => {
+                                if app.sky_speed_index > 0 { app.sky_speed_index -= 1; }
+                            }
+                            Tab::SolarSystem => {
+                                if app.orrery_speed_index > 0 { app.orrery_speed_index -= 1; }
+                            }
+                        }
+                        app.live_mode = false;
+                        app.last_tick = Instant::now();
+                    }
+                    KeyCode::Char('.') => {
+                        match app.tab {
+                            Tab::Sky | Tab::Weather => {
+                                if app.sky_speed_index + 1 < SKY_SPEED_PRESETS.len() { app.sky_speed_index += 1; }
+                            }
+                            Tab::SolarSystem => {
+                                if app.orrery_speed_index + 1 < ORRERY_SPEED_PRESETS.len() { app.orrery_speed_index += 1; }
+                            }
+                        }
+                        app.live_mode = false;
+                        app.last_tick = Instant::now();
                     }
                     KeyCode::Char('+') | KeyCode::Char('=') => {
                         app.max_mag = (app.max_mag + 0.5).min(8.0);
@@ -222,6 +266,7 @@ fn apply_input(app: &mut App) {
             if let Ok(naive) = NaiveDateTime::parse_from_str(&app.input_buf, "%Y-%m-%d %H:%M") {
                 app.datetime = DateTime::from_naive_utc_and_offset(naive, Utc);
                 app.live_mode = false;
+                app.time_paused = true;
             }
         }
         InputMode::Normal => {}

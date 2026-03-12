@@ -175,14 +175,14 @@ pub fn orrery_scale(au: f64) -> f64 {
 
 pub fn compute_orrery(datetime: DateTime<Utc>) -> OrreryInfo {
     const BODIES: &[(&str, &str, i32)] = &[
-        ("Mercury", "☿", astro_body_t_BODY_MERCURY),
-        ("Venus", "♀", astro_body_t_BODY_VENUS),
-        ("Earth", "♁", astro_body_t_BODY_EARTH),
-        ("Mars", "♂", astro_body_t_BODY_MARS),
-        ("Jupiter", "♃", astro_body_t_BODY_JUPITER),
-        ("Saturn", "♄", astro_body_t_BODY_SATURN),
-        ("Uranus", "⛢", astro_body_t_BODY_URANUS),
-        ("Neptune", "♆", astro_body_t_BODY_NEPTUNE),
+        ("Mercury", "⚪☿", astro_body_t_BODY_MERCURY),
+        ("Venus", "🟡♀", astro_body_t_BODY_VENUS),
+        ("Earth", "🌍♁", astro_body_t_BODY_EARTH),
+        ("Mars", "🔴♂", astro_body_t_BODY_MARS),
+        ("Jupiter", "🟠♃", astro_body_t_BODY_JUPITER),
+        ("Saturn", "🪐♄", astro_body_t_BODY_SATURN),
+        ("Uranus", "🔵⛢", astro_body_t_BODY_URANUS),
+        ("Neptune", "🔵♆", astro_body_t_BODY_NEPTUNE),
     ];
     let time = astro_time_from_datetime(datetime);
     let planets = BODIES

@@ -474,7 +474,7 @@ fn render_orrery_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             ctx.print(
                 0.0,
                 0.0,
-                Line::from(Span::styled("☀", Style::default().fg(Color::Yellow))),
+                Line::from(Span::styled("🌞", Style::default().fg(Color::Yellow))),
             );
 
             for (cx, cy, symbol, color) in &planet_data {

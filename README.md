@@ -2,15 +2,19 @@
 
 A terminal planetarium — view the night sky and weather forecast from your command line.
 
-![stellui screenshot placeholder](https://via.placeholder.com/800x400?text=stellui)
+![stellui solar system screenshot](solar_system.png)
 
 ## Features
 
 - **Sky map** — stereographic projection of the visible sky with 9,000+ stars from the J2000 catalog
 - **Sun & Moon** — real-time positions and moon phase
-- **Weather forecast** — hourly seeing quality via [Open-Meteo](https://open-meteo.com/)
+- **Solar system orrery** — animated top-down view of the planets
+- **Almanac** — 24-hour radial altitude plot for the Sun and Moon
+- **Weather forecast** — hourly seeing quality via [Open-Meteo](https://open-meteo.com/) with sparklines
 - **Live mode** — auto-updates at ~60fps
-- **Time travel** — set any date/time to preview the sky
+- **Time travel** — simulate time at variable speeds (1x → 1 day/s) forward or backward
+- **Local time** — timezone auto-detected from observer coordinates
+- **Southern hemisphere** support
 
 ## Installation
 
@@ -59,10 +63,15 @@ height = 0.0
 |-----|--------|
 | `s` | Sky tab |
 | `w` | Weather tab |
-| `Space` | Toggle live mode |
+| `p` | Solar System orrery tab |
+| `a` | Almanac tab |
+| `n` | Jump to now (live mode) |
+| `Space` | Pause / resume simulation |
+| `,` / `.` | Decrease / increase simulation speed |
 | `l` | Edit latitude |
 | `o` | Edit longitude |
-| `t` | Edit date/time (UTC, `YYYY-MM-DD HH:MM`) |
+| `t` | Edit date/time (`YYYY-MM-DD HH:MM` local time) |
+| `z` | Edit timezone |
 | `+` / `=` | Show fainter stars (increase magnitude limit) |
 | `-` | Show fewer stars (decrease magnitude limit) |
 | `r` | Refresh weather |

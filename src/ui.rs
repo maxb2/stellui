@@ -126,10 +126,13 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     });
     let phase_angle = app.sun_moon.moon_cycle_degrees;
 
+    let southern = app.lat < 0.0;
     let canvas_title = if test_mode {
-        " Sky View (horizon circle, N=bottom) [ORION ONLY] "
+        if southern { " Sky View (horizon circle, N=top) [ORION ONLY] " }
+        else { " Sky View (horizon circle, N=bottom) [ORION ONLY] " }
     } else {
-        " Sky View (horizon circle, N=bottom) "
+        if southern { " Sky View (horizon circle, N=top) " }
+        else { " Sky View (horizon circle, N=bottom) " }
     };
 
     let canvas = Canvas::default()
@@ -164,11 +167,13 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 });
             }
 
-            // Cardinal labels (N=bottom due to canvas_orient convention)
-            ctx.print(0.0, -2.15, "N");
-            ctx.print(0.0, 2.15, "S");
-            ctx.print(2.15, 0.0, "E");
-            ctx.print(-2.15, 0.0, "W");
+            // Cardinal labels
+            let (n_y, s_y) = if southern { (2.15, -2.15) } else { (-2.15, 2.15) };
+            let (e_x, w_x) = if southern { (-2.15, 2.15) } else { (2.15, -2.15) };
+            ctx.print(0.0, n_y, "N");
+            ctx.print(0.0, s_y, "S");
+            ctx.print(e_x, 0.0, "E");
+            ctx.print(w_x, 0.0, "W");
 
             if let Some((sx, sy)) = sun_pos {
                 ctx.print(

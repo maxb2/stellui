@@ -207,6 +207,13 @@ impl PolarCoordinates {
         }
     }
 
+    /// Like `canvas_orient` but flips N/S for southern-hemisphere planisphere view.
+    /// Pass `southern = lat < 0.0`.
+    pub fn canvas_orient_for(self, southern: bool) -> Self {
+        let phi = if southern { self.phi + 90.0 } else { self.phi - 90.0 };
+        Self { rad: self.rad, phi }
+    }
+
     /// Rotate `phi` in-place by `phi` degrees (positive = counter-clockwise).
     pub fn mut_rot(&mut self, phi: f64) {
         self.phi += phi;

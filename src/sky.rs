@@ -64,7 +64,7 @@ pub fn compute_stars(
             if polar.rad > 2.0 {
                 return None;
             }
-            let oriented = polar.canvas_orient();
+            let oriented = polar.canvas_orient_for(lat < 0.0);
             let cart = CartesianCoordinates::from(oriented);
             Some(RenderedStar {
                 x: cart.x,
@@ -125,7 +125,7 @@ pub fn compute_planets(
                 return None;
             }
 
-            let oriented = polar.canvas_orient();
+            let oriented = polar.canvas_orient_for(lat < 0.0);
             let cart = CartesianCoordinates::from(oriented);
 
             let illum = Astronomy_Illumination(body, time);
@@ -307,7 +307,7 @@ pub fn compute_sun_moon(lat: f64, lon: f64, height: f64, datetime: DateTime<Utc>
     let smp = SunMoonProjection::from_time_observer(&mut time, &observer);
 
     let to_opt = |hor: &astronomy_engine_bindings::astro_horizon_t| {
-        let p = hor_to_stereo(hor).canvas_orient();
+        let p = hor_to_stereo(hor).canvas_orient_for(lat < 0.0);
         if p.rad <= 2.0 { Some(p) } else { None }
     };
 

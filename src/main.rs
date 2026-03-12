@@ -276,16 +276,6 @@ fn run(
         }
     }
 
-    // Persist current settings to config file
-    let cfg = config::Config {
-        lat: Some(app.lat),
-        lon: Some(app.lon),
-        height: Some(app.height),
-        timezone: app.timezone.map(|tz| tz.name().to_string()),
-        max_mag: Some(app.max_mag),
-    };
-    cfg.save().ok();
-
     Ok(())
 }
 

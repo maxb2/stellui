@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct Config {
     pub lat: Option<f64>,
     pub lon: Option<f64>,
@@ -36,13 +36,4 @@ impl Config {
         toml::from_str(&text).unwrap_or_default()
     }
 
-    pub fn save(&self) -> anyhow::Result<()> {
-        let path = config_path().ok_or_else(|| anyhow::anyhow!("could not determine config path"))?;
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        let text = toml::to_string(self)?;
-        std::fs::write(&path, text)?;
-        Ok(())
-    }
 }

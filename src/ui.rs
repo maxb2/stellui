@@ -276,13 +276,105 @@ fn render_weather(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         return;
     };
 
-    let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(5)]).split(area);
-
-    // Table
-    let header = Row::new(vec![
-        "Time", "Cloud%", "Humid%", "Precip%", "Vis(km)", "Temp°C", "Seeing",
+    let cols = Layout::horizontal([
+        Constraint::Percentage(55),
+        Constraint::Percentage(45),
     ])
-    .style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED));
+    .split(area);
+
+    let left_chunks = Layout::vertical([
+        Constraint::Length(8),
+        Constraint::Length(8),
+        Constraint::Length(8),
+        Constraint::Length(8),
+        Constraint::Length(8),
+        Constraint::Min(0),
+    ])
+    .split(cols[0]);
+
+    // Time formatter: API returns UTC; convert to observer local time via app.timezone
+    use chrono::{NaiveDateTime, TimeZone, Utc};
+    let first_local_date = forecasts.first()
+        .and_then(|f| NaiveDateTime::parse_from_str(&f.time, "%Y-%m-%dT%H:%M").ok())
+        .map(|ndt| {
+            if let Some(tz) = app.timezone {
+                Utc.from_utc_datetime(&ndt).with_timezone(&tz).date_naive()
+            } else {
+                ndt.date()
+            }
+        });
+    let format_time = |time_str: &str| -> String {
+        let Ok(ndt) = NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M") else {
+            return time_str.get(11..16).unwrap_or(time_str).to_string();
+        };
+        if let Some(tz) = app.timezone {
+            let local_dt = Utc.from_utc_datetime(&ndt).with_timezone(&tz);
+            if first_local_date == Some(local_dt.date_naive()) {
+                local_dt.format("%H:%M").to_string()
+            } else {
+                local_dt.format("%a %H:%M").to_string()
+            }
+        } else {
+            // No timezone info — show UTC
+            if first_local_date == Some(ndt.date()) {
+                ndt.format("%H:%M").to_string()
+            } else {
+                ndt.format("%a %H:%M").to_string()
+            }
+        }
+    };
+
+    // Sparklines (left panel)
+    let cloud_data: Vec<u64> = forecasts.iter().map(|f| f.cloud_cover as u64).collect();
+    let cloud_sparkline = Sparkline::default()
+        .block(Block::default().borders(Borders::ALL).title(" Cloud Cover (%) "))
+        .data(&cloud_data)
+        .max(100)
+        .style(Style::default().fg(Color::Cyan));
+
+    let humidity_data: Vec<u64> = forecasts.iter().map(|f| f.relative_humidity as u64).collect();
+    let humidity_sparkline = Sparkline::default()
+        .block(Block::default().borders(Borders::ALL).title(" Humidity (%) "))
+        .data(&humidity_data)
+        .max(100)
+        .style(Style::default().fg(Color::Blue));
+
+    let precip_data: Vec<u64> = forecasts.iter().map(|f| f.precip_probability as u64).collect();
+    let precip_sparkline = Sparkline::default()
+        .block(Block::default().borders(Borders::ALL).title(" Precip Probability (%) "))
+        .data(&precip_data)
+        .max(100)
+        .style(Style::default().fg(Color::Yellow));
+
+    let temps: Vec<f64> = forecasts.iter().map(|f| f.temperature_c).collect();
+    let temp_min = temps.iter().cloned().fold(f64::INFINITY, f64::min);
+    let temp_max = temps.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let shift = if temp_min < 0.0 { temp_min.abs().ceil() as u64 } else { 0 };
+    let temp_data: Vec<u64> = temps.iter().map(|&t| (t + shift as f64) as u64).collect();
+    let temp_range = ((temp_max - temp_min).ceil() as u64 + 1).max(1);
+    let temp_sparkline = Sparkline::default()
+        .block(Block::default().borders(Borders::ALL).title(format!(" Temperature [{:.0}..{:.0} °C] ", temp_min, temp_max)))
+        .data(&temp_data)
+        .max(temp_range + shift)
+        .style(Style::default().fg(Color::Red));
+
+    let vis_data: Vec<u64> = forecasts.iter().map(|f| (f.visibility_km * 10.0) as u64).collect();
+    let vis_max = vis_data.iter().cloned().max().unwrap_or(1).max(1);
+    let vis_sparkline = Sparkline::default()
+        .block(Block::default().borders(Borders::ALL).title(" Visibility (km) "))
+        .data(&vis_data)
+        .max(vis_max)
+        .style(Style::default().fg(Color::Green));
+
+    f.render_widget(cloud_sparkline,    left_chunks[0]);
+    f.render_widget(humidity_sparkline, left_chunks[1]);
+    f.render_widget(precip_sparkline,   left_chunks[2]);
+    f.render_widget(temp_sparkline,     left_chunks[3]);
+    f.render_widget(vis_sparkline,      left_chunks[4]);
+
+    // Table (right panel)
+    let header = Row::new(vec!["Time", "Cld", "Hum", "Prc", "Vis", "Tmp", "Seeing"])
+        .style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED));
 
     let rows: Vec<Row> = forecasts
         .iter()
@@ -294,7 +386,7 @@ fn render_weather(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 SeeingQuality::Poor | SeeingQuality::Bad => Color::Red,
             };
             Row::new(vec![
-                f.time.clone(),
+                format_time(&f.time),
                 format!("{:.0}", f.cloud_cover),
                 format!("{:.0}", f.relative_humidity),
                 format!("{:.0}", f.precip_probability),
@@ -307,13 +399,13 @@ fn render_weather(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .collect();
 
     let widths = [
-        Constraint::Length(17),
-        Constraint::Length(8),
-        Constraint::Length(8),
-        Constraint::Length(8),
-        Constraint::Length(8),
-        Constraint::Length(8),
-        Constraint::Length(10),
+        Constraint::Length(9),
+        Constraint::Length(4),
+        Constraint::Length(4),
+        Constraint::Length(4),
+        Constraint::Length(6),
+        Constraint::Length(6),
+        Constraint::Min(5),
     ];
 
     let table = Table::new(rows, widths).header(header).block(
@@ -324,26 +416,7 @@ fn render_weather(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let mut state = TableState::default();
     state.select(Some(app.weather_scroll));
-    f.render_stateful_widget(table, chunks[0], &mut state);
-
-    // Sparkline of cloud cover for next 24h
-    let cloud_data: Vec<u64> = forecasts
-        .iter()
-        .take(24)
-        .map(|f| f.cloud_cover as u64)
-        .collect();
-
-    let sparkline = Sparkline::default()
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Cloud Cover - Next 24h (%) "),
-        )
-        .data(&cloud_data)
-        .max(100)
-        .style(Style::default().fg(Color::Cyan));
-
-    f.render_widget(sparkline, chunks[1]);
+    f.render_stateful_widget(table, cols[1], &mut state);
 }
 
 fn orrery_planet_color(name: &str) -> Color {

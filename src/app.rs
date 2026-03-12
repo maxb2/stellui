@@ -144,3 +144,29 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{NaiveDateTime, TimeZone, Utc};
+
+    #[test]
+    fn central_time_dst_after_spring_forward() {
+        // March 11, 2026 is after US spring-forward (March 8, 2026)
+        // 21:00 UTC should be 16:00 CDT (UTC-5), not 15:00 CST (UTC-6)
+        let utc = Utc.from_utc_datetime(
+            &NaiveDateTime::parse_from_str("2026-03-11 21:00", "%Y-%m-%d %H:%M").unwrap()
+        );
+        let tz = "America/Chicago".parse::<chrono_tz::Tz>().unwrap();
+        let local = utc.with_timezone(&tz);
+        assert_eq!(local.format("%H:%M %Z").to_string(), "16:00 CDT");
+    }
+
+    #[test]
+    fn resolve_tz_chicago() {
+        // Chicago coordinates should resolve to America/Chicago
+        let tz = resolve_tz(41.88, -87.63);
+        assert!(tz.is_some());
+        assert_eq!(tz.unwrap().name(), "America/Chicago");
+    }
+}

@@ -297,7 +297,7 @@ fn apply_input(app: &mut App) {
             if let Ok(naive) = NaiveDateTime::parse_from_str(&app.input_buf, "%Y-%m-%d %H:%M") {
                 app.datetime = if let Some(tz) = app.timezone {
                     tz.from_local_datetime(&naive)
-                        .single()
+                        .earliest()
                         .map(|dt: chrono::DateTime<chrono_tz::Tz>| dt.to_utc())
                         .unwrap_or_else(|| DateTime::from_naive_utc_and_offset(naive, Utc))
                 } else {

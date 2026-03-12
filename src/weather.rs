@@ -90,7 +90,8 @@ pub fn fetch_forecast(lat: f64, lon: f64) -> anyhow::Result<Vec<HourlyForecast>>
         "https://api.open-meteo.com/v1/forecast\
 ?latitude={lat}&longitude={lon}\
 &hourly=cloud_cover,relative_humidity_2m,precipitation_probability,visibility,temperature_2m\
-&forecast_days=3"
+&forecast_days=3\
+&timezone=GMT"
     );
 
     let response: WeatherResponse = ureq::get(&url).call()?.into_json()?;

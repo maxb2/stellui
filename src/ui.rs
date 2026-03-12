@@ -535,7 +535,7 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let local_str = if let Some(tz) = app.timezone {
         let local = app.datetime.with_timezone(&tz);
-        format!("  {}", local.format("%H:%M %Z"))
+        format!("  {} [{}]", local.format("%H:%M %Z"), tz.name())
     } else {
         String::new()
     };

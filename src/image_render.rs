@@ -177,12 +177,16 @@ pub fn generate_sky_image(snap: &SkySnapshot) -> DynamicImage {
         }
     }
 
-    // Cardinal labels
-    let label_r = 2.15f32 * SCALE + 16.0; // just outside horizon circle
+    // Cardinal labels — placed just inside the image edge (horizon circle is 2.0*SCALE ≈ 376px
+    // from center; image half-width is 400px, so 2.15*SCALE would be out of bounds)
+    let label_r = 2.0f32 * SCALE + 8.0;
+    // Image y increases downward, canvas y increases upward (y flipped in canvas_to_px).
+    // Northern hemisphere: N is at canvas y=-2.15 → image y = CENTER + r (bottom of image).
+    // n_y is the image-y offset from CENTER (positive = down).
     let (n_y, s_y) = if snap.southern { (-label_r, label_r) } else { (label_r, -label_r) };
     let (e_x, w_x) = if snap.southern { (-label_r, label_r) } else { (label_r, -label_r) };
-    draw_cardinal(&mut pixmap, "N", CENTER, CENTER - n_y);
-    draw_cardinal(&mut pixmap, "S", CENTER, CENTER - s_y);
+    draw_cardinal(&mut pixmap, "N", CENTER, CENTER + n_y);
+    draw_cardinal(&mut pixmap, "S", CENTER, CENTER + s_y);
     draw_cardinal(&mut pixmap, "E", CENTER + e_x, CENTER);
     draw_cardinal(&mut pixmap, "W", CENTER + w_x, CENTER);
 

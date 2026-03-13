@@ -88,6 +88,10 @@ pub struct App {
     pub weather_loading: bool,
     pub weather_error: Option<String>,
     pub weather_scroll: usize,
+
+    pub use_image_renderer: bool,
+    pub sky_image: Option<image::DynamicImage>,
+    pub sky_image_gen: u64,
 }
 
 impl App {
@@ -122,6 +126,9 @@ impl App {
             weather_loading: false,
             weather_error: None,
             weather_scroll: 0,
+            use_image_renderer: false,
+            sky_image: None,
+            sky_image_gen: 0,
         };
         app.recompute();
         app
@@ -141,6 +148,10 @@ impl App {
         self.orrery = sky::compute_orrery(self.datetime);
         if matches!(self.tab, Tab::Almanac) {
             self.almanac = sky::compute_almanac(self.lat, self.lon, self.height, self.datetime, self.timezone);
+        }
+        if self.use_image_renderer {
+            self.sky_image = Some(crate::image_render::generate_sky_image(self));
+            self.sky_image_gen += 1;
         }
     }
 }

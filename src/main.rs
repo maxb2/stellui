@@ -1,5 +1,6 @@
 mod app;
 mod config;
+mod image_render;
 mod sky;
 mod ui;
 mod weather;
@@ -16,6 +17,8 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
+use ratatui_image::picker::Picker;
+use ratatui_image::protocol::StatefulProtocol as RatatuiImageState;
 
 use app::{App, InputMode, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab, resolve_tz};
 use weather::HourlyForecast;
@@ -94,6 +97,10 @@ fn run(
     spawn_weather(&tx, app.lat, app.lon);
     app.weather_loading = true;
 
+    let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
+    let mut image_state: Option<RatatuiImageState> = None;
+    let mut last_image_gen: u64 = u64::MAX;
+
     loop {
         // Poll weather result (non-blocking)
         if let Ok(result) = rx.try_recv() {
@@ -127,7 +134,18 @@ fn run(
             app.recompute();
         }
 
-        terminal.draw(|f| ui::render(f, &app))?;
+        if app.use_image_renderer {
+            if app.sky_image_gen != last_image_gen
+                && let Some(img) = &app.sky_image
+            {
+                image_state = Some(picker.new_resize_protocol(img.clone()));
+                last_image_gen = app.sky_image_gen;
+            }
+        } else {
+            image_state = None;
+            last_image_gen = u64::MAX;
+        }
+        terminal.draw(|f| ui::render(f, &app, image_state.as_mut() as Option<&mut RatatuiImageState>))?;
 
         if event::poll(Duration::from_millis(16))?
             && let Event::Key(key) = event::read()?
@@ -225,6 +243,15 @@ fn run(
                     KeyCode::Char('d') | KeyCode::Char('D') => {
                         app.test_mode = !app.test_mode;
                         app.recompute();
+                    }
+                    KeyCode::Char('i') | KeyCode::Char('I') => {
+                        if matches!(app.tab, Tab::Sky) {
+                            app.use_image_renderer = !app.use_image_renderer;
+                            if app.use_image_renderer {
+                                app.sky_image = Some(image_render::generate_sky_image(&app));
+                                app.sky_image_gen += 1;
+                            }
+                        }
                     }
                     KeyCode::Char('r') | KeyCode::Char('R') => {
                         if !app.weather_loading {

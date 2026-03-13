@@ -1,6 +1,6 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout},
+    layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
@@ -8,6 +8,8 @@ use ratatui::{
         canvas::{Canvas, Circle, Line as CanvasLine, Points},
     },
 };
+use ratatui_image::protocol::StatefulProtocol as RatatuiImageState;
+use ratatui_image::{Resize, StatefulImage};
 
 use crate::app::{App, InputMode, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab};
 use crate::sky::{self, ALMANAC_STEPS};
@@ -41,7 +43,7 @@ fn moon_phase_char(cycle_degrees: f64) -> &'static str {
     }
 }
 
-pub fn render(f: &mut Frame, app: &App) {
+pub fn render(f: &mut Frame, app: &App, image_state: Option<&mut RatatuiImageState>) {
     let chunks = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(0),
@@ -52,7 +54,7 @@ pub fn render(f: &mut Frame, app: &App) {
     render_tabs(f, app, chunks[0]);
 
     match app.tab {
-        Tab::Sky => render_sky(f, app, chunks[1]),
+        Tab::Sky => render_sky(f, app, chunks[1], image_state),
         Tab::Weather => render_weather(f, app, chunks[1]),
         Tab::SolarSystem => render_solar_system(f, app, chunks[1]),
         Tab::Almanac => render_almanac(f, app, chunks[1]),
@@ -80,12 +82,23 @@ fn render_tabs(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     f.render_widget(tabs, area);
 }
 
-fn render_sky(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+fn render_sky(f: &mut Frame, app: &App, area: Rect, image_state: Option<&mut RatatuiImageState>) {
     let cols =
         Layout::horizontal([Constraint::Percentage(80), Constraint::Percentage(20)]).split(area);
 
-    render_canvas(f, app, cols[0]);
+    if app.use_image_renderer {
+        if let Some(state) = image_state {
+            render_sky_image(f, state, cols[0]);
+        }
+    } else {
+        render_canvas(f, app, cols[0]);
+    }
     render_info_panel(f, app, cols[1]);
+}
+
+fn render_sky_image(f: &mut Frame, state: &mut RatatuiImageState, area: Rect) {
+    let img = StatefulImage::new().resize(Resize::Fit(None));
+    f.render_stateful_widget(img, area, state);
 }
 
 fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -559,7 +572,7 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let line2 = match app.tab {
         Tab::Sky =>
-            " [L]lat [O]lon [T]time [Z]tz [N]now [Space]pause [,/.]speed [+/-]mag [D]orion [S/W/P/A]tab [Q]quit",
+            " [L]lat [O]lon [T]time [Z]tz [N]now [Space]pause [,/.]speed [+/-]mag [I]image [D]orion [S/W/P/A]tab [Q]quit",
         Tab::Weather =>
             " [L]lat [O]lon [R]weather [↑/↓]scroll [S/W/P/A]tab [Q]quit",
         Tab::SolarSystem =>

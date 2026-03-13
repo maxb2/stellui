@@ -1,7 +1,7 @@
 use image::DynamicImage;
 use tiny_skia::{Color, FillRule, Paint, PathBuilder, Pixmap, Stroke, Transform};
 
-use crate::app::App;
+use crate::sky::{RenderedPlanet, RenderedStar, SunMoonInfo};
 use stellui::astro::CartesianCoordinates;
 
 const SIZE: u32 = 800;
@@ -27,7 +27,15 @@ fn planet_color_rgb(name: &str) -> (u8, u8, u8) {
     }
 }
 
-pub fn generate_sky_image(app: &App) -> DynamicImage {
+/// Snapshot of the sky data needed to render an image, cloneable and Send.
+#[derive(Clone)]
+pub struct SkySnapshot {
+    pub stars: Vec<RenderedStar>,
+    pub sun_moon: SunMoonInfo,
+    pub planets: Vec<RenderedPlanet>,
+}
+
+pub fn generate_sky_image(snap: &SkySnapshot) -> DynamicImage {
     let mut pixmap = Pixmap::new(SIZE, SIZE).expect("failed to create pixmap");
 
     // Black background
@@ -46,7 +54,7 @@ pub fn generate_sky_image(app: &App) -> DynamicImage {
     }
 
     // Stars
-    for star in &app.stars {
+    for star in &snap.stars {
         let (px, py) = canvas_to_px(star.x, star.y);
         let (radius, r, g, b) = if star.mag <= 2.0 {
             (3.0f32, 255u8, 255u8, 255u8)
@@ -67,7 +75,7 @@ pub fn generate_sky_image(app: &App) -> DynamicImage {
     }
 
     // Sun
-    if let Some(polar) = &app.sun_moon.sun_stereo {
+    if let Some(polar) = &snap.sun_moon.sun_stereo {
         let c = CartesianCoordinates::from(polar);
         let (px, py) = canvas_to_px(c.x, c.y);
         let mut pb = PathBuilder::new();
@@ -81,7 +89,7 @@ pub fn generate_sky_image(app: &App) -> DynamicImage {
     }
 
     // Moon
-    if let Some(polar) = &app.sun_moon.moon_stereo {
+    if let Some(polar) = &snap.sun_moon.moon_stereo {
         let c = CartesianCoordinates::from(polar);
         let (px, py) = canvas_to_px(c.x, c.y);
         let mut pb = PathBuilder::new();
@@ -95,7 +103,7 @@ pub fn generate_sky_image(app: &App) -> DynamicImage {
     }
 
     // Planets
-    for planet in &app.planets {
+    for planet in &snap.planets {
         let (px, py) = canvas_to_px(planet.x, planet.y);
         let (r, g, b) = planet_color_rgb(planet.name);
         let mut pb = PathBuilder::new();

@@ -14,12 +14,14 @@ use stellui::astro::{
 };
 use stellui::catalog;
 
+#[derive(Clone)]
 pub struct RenderedStar {
     pub x: f64,
     pub y: f64,
     pub mag: f64,
 }
 
+#[derive(Clone)]
 pub struct RenderedPlanet {
     pub name: &'static str,
     pub symbol: &'static str,
@@ -28,6 +30,7 @@ pub struct RenderedPlanet {
     pub mag: f64,
 }
 
+#[derive(Clone)]
 pub struct SunMoonInfo {
     pub sun_stereo: Option<PolarCoordinates>,
     pub moon_stereo: Option<PolarCoordinates>,

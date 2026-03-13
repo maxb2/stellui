@@ -97,8 +97,13 @@ fn render_sky(f: &mut Frame, app: &App, area: Rect, image_state: Option<&mut Rat
 }
 
 fn render_sky_image(f: &mut Frame, state: &mut RatatuiImageState, area: Rect) {
-    let img = StatefulImage::new().resize(Resize::Fit(None));
-    f.render_stateful_widget(img, area, state);
+    let resize = Resize::Scale(None);
+    let rendered = state.size_for(resize.clone(), area);
+    let x_off = area.width.saturating_sub(rendered.width) / 2;
+    let y_off = area.height.saturating_sub(rendered.height) / 2;
+    let centered = Rect::new(area.x + x_off, area.y + y_off, rendered.width, rendered.height);
+    let img = StatefulImage::new().resize(resize);
+    f.render_stateful_widget(img, centered, state);
 }
 
 fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {

@@ -21,6 +21,7 @@ use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol as RatatuiImageState;
 
 use app::{App, InputMode, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab, resolve_tz};
+use image_render::SkySnapshot;
 use weather::HourlyForecast;
 
 fn main() -> Result<()> {
@@ -100,6 +101,8 @@ fn run(
     let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
     let mut image_state: Option<RatatuiImageState> = None;
     let mut last_image_gen: u64 = u64::MAX;
+    let (img_tx, img_rx) = mpsc::channel::<image::DynamicImage>();
+    let mut image_generating = false;
 
     loop {
         // Poll weather result (non-blocking)
@@ -135,15 +138,29 @@ fn run(
         }
 
         if app.use_image_renderer {
-            if app.sky_image_gen != last_image_gen
-                && let Some(img) = &app.sky_image
-            {
-                image_state = Some(picker.new_resize_protocol(img.clone()));
+            // Receive completed image from background thread
+            if let Ok(img) = img_rx.try_recv() {
+                image_state = Some(picker.new_resize_protocol(img));
+                image_generating = false;
+            }
+            // Kick off a new generation if data changed and no generation in flight
+            if !image_generating && app.sky_image_gen != last_image_gen {
+                let snap = SkySnapshot {
+                    stars: app.stars.clone(),
+                    sun_moon: app.sun_moon.clone(),
+                    planets: app.planets.clone(),
+                };
+                let tx = img_tx.clone();
+                std::thread::spawn(move || {
+                    tx.send(image_render::generate_sky_image(&snap)).ok();
+                });
+                image_generating = true;
                 last_image_gen = app.sky_image_gen;
             }
         } else {
             image_state = None;
             last_image_gen = u64::MAX;
+            image_generating = false;
         }
         terminal.draw(|f| ui::render(f, &app, image_state.as_mut() as Option<&mut RatatuiImageState>))?;
 
@@ -247,10 +264,8 @@ fn run(
                     KeyCode::Char('i') | KeyCode::Char('I') => {
                         if matches!(app.tab, Tab::Sky) {
                             app.use_image_renderer = !app.use_image_renderer;
-                            if app.use_image_renderer {
-                                app.sky_image = Some(image_render::generate_sky_image(&app));
-                                app.sky_image_gen += 1;
-                            }
+                            last_image_gen = u64::MAX;
+                            image_generating = false;
                         }
                     }
                     KeyCode::Char('r') | KeyCode::Char('R') => {

@@ -33,6 +33,67 @@ pub struct SkySnapshot {
     pub stars: Vec<RenderedStar>,
     pub sun_moon: SunMoonInfo,
     pub planets: Vec<RenderedPlanet>,
+    pub southern: bool,
+}
+
+/// Draw a single character as strokes. (ox, oy) is top-left; y increases downward.
+fn draw_char(pixmap: &mut Pixmap, ch: char, ox: f32, oy: f32, h: f32, paint: &Paint, stroke: &Stroke) {
+    let w = h * 0.65;
+    let m = h * 0.5;
+
+    let lines: &[(f32, f32, f32, f32)] = match ch {
+        'N' => &[
+            (0.0, 0.0, 0.0, h),
+            (w,   0.0, w,   h),
+            (0.0, 0.0, w,   h),
+        ],
+        'S' => &[
+            (w,   0.0, 0.0, 0.0),
+            (0.0, 0.0, 0.0, m),
+            (0.0, m,   w,   m),
+            (w,   m,   w,   h),
+            (w,   h,   0.0, h),
+        ],
+        'E' => &[
+            (0.0, 0.0, 0.0, h),
+            (0.0, 0.0, w,   0.0),
+            (0.0, m,   w * 0.75, m),
+            (0.0, h,   w,   h),
+        ],
+        'W' => &[
+            (0.0,      0.0, w * 0.25, h),
+            (w * 0.25, h,   w * 0.5,  m),
+            (w * 0.5,  m,   w * 0.75, h),
+            (w * 0.75, h,   w,        0.0),
+        ],
+        _ => &[],
+    };
+
+    for &(x1, y1, x2, y2) in lines {
+        let mut pb = PathBuilder::new();
+        pb.move_to(ox + x1, oy + y1);
+        pb.line_to(ox + x2, oy + y2);
+        if let Some(path) = pb.finish() {
+            pixmap.stroke_path(&path, paint, stroke, Transform::identity(), None);
+        }
+    }
+}
+
+/// Draw a cardinal label centered at (cx, cy) in image pixel space.
+fn draw_cardinal(pixmap: &mut Pixmap, label: &str, cx: f32, cy: f32) {
+    let h = 18.0_f32;
+    let w = h * 0.65;
+    let mut paint = Paint::default();
+    paint.set_color_rgba8(160, 160, 160, 255);
+    paint.anti_alias = true;
+    let stroke = Stroke { width: 2.0, ..Default::default() };
+    // Center the label horizontally and vertically
+    let total_w = label.len() as f32 * (w + 2.0) - 2.0;
+    let ox = cx - total_w * 0.5;
+    let oy = cy - h * 0.5;
+    for (i, ch) in label.chars().enumerate() {
+        draw_char(pixmap, ch, ox + i as f32 * (w + 2.0), oy, h, &paint, &stroke);
+    }
 }
 
 pub fn generate_sky_image(snap: &SkySnapshot) -> DynamicImage {
@@ -115,6 +176,15 @@ pub fn generate_sky_image(snap: &SkySnapshot) -> DynamicImage {
             pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
         }
     }
+
+    // Cardinal labels
+    let label_r = 2.15f32 * SCALE + 16.0; // just outside horizon circle
+    let (n_y, s_y) = if snap.southern { (-label_r, label_r) } else { (label_r, -label_r) };
+    let (e_x, w_x) = if snap.southern { (-label_r, label_r) } else { (label_r, -label_r) };
+    draw_cardinal(&mut pixmap, "N", CENTER, CENTER - n_y);
+    draw_cardinal(&mut pixmap, "S", CENTER, CENTER - s_y);
+    draw_cardinal(&mut pixmap, "E", CENTER + e_x, CENTER);
+    draw_cardinal(&mut pixmap, "W", CENTER + w_x, CENTER);
 
     // Convert Pixmap (premultiplied RGBA) -> DynamicImage
     // All pixels are opaque so premul == straight alpha

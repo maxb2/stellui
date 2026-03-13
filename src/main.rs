@@ -17,8 +17,10 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui_image::picker::Picker;
-use ratatui_image::protocol::StatefulProtocol as RatatuiImageState;
+use ratatui_image::protocol::StatefulProtocol;
+use ratatui_image::{Resize, ResizeEncodeRender};
 
 use app::{App, InputMode, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab, resolve_tz};
 use image_render::SkySnapshot;
@@ -99,10 +101,24 @@ fn run(
     app.weather_loading = true;
 
     let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
-    let mut image_state: Option<RatatuiImageState> = None;
+    let mut image_state: Option<StatefulProtocol> = None;
+    let mut image_encoded_rect: Option<Rect> = None;
     let mut last_image_gen: u64 = u64::MAX;
     let (img_tx, img_rx) = mpsc::channel::<image::DynamicImage>();
     let mut image_generating = false;
+    let mut encode_in_flight = false;
+
+    let (pre_enc_tx, pre_enc_rx) = mpsc::channel::<(StatefulProtocol, Rect)>();
+    let (pre_enc_done_tx, pre_enc_done_rx) = mpsc::channel::<(StatefulProtocol, Rect)>();
+    std::thread::spawn(move || {
+        while let Ok((mut proto, area)) = pre_enc_rx.recv() {
+            let encode_rect = proto
+                .needs_resize(&Resize::Scale(None), area)
+                .unwrap_or(Rect::new(0, 0, area.width, area.height));
+            proto.resize_encode(&Resize::Scale(None), encode_rect);
+            pre_enc_done_tx.send((proto, encode_rect)).ok();
+        }
+    });
 
     loop {
         // Poll weather result (non-blocking)
@@ -138,17 +154,36 @@ fn run(
         }
 
         if app.use_image_renderer {
-            // Receive completed image from background thread
-            if let Ok(img) = img_rx.try_recv() {
-                image_state = Some(picker.new_resize_protocol(img));
+            let term = terminal.size().unwrap_or_default();
+            let content_h = term.height.saturating_sub(6);
+            let content_area = Rect::new(0, 3, term.width, content_h);
+            let panel_area = Layout::horizontal([
+                Constraint::Percentage(80),
+                Constraint::Percentage(20),
+            ])
+            .split(content_area)[0];
+
+            // Receive pre-encoded proto → set as display state (no blank on next render)
+            if let Ok((proto, rect)) = pre_enc_done_rx.try_recv() {
+                image_state = Some(proto);
+                image_encoded_rect = Some(rect);
                 image_generating = false;
+                encode_in_flight = false;
             }
-            // Kick off a new generation if data changed and no generation in flight
-            if !image_generating && app.sky_image_gen != last_image_gen {
+            // Receive raw image → kick off pre-encode
+            if let Ok(img) = img_rx.try_recv() {
+                image_generating = false;
+                let proto = picker.new_resize_protocol(img);
+                pre_enc_tx.send((proto, panel_area)).ok();
+                encode_in_flight = true;
+            }
+            // Generate new image only when idle
+            if !image_generating && !encode_in_flight && app.sky_image_gen != last_image_gen {
                 let snap = SkySnapshot {
                     stars: app.stars.clone(),
                     sun_moon: app.sun_moon.clone(),
                     planets: app.planets.clone(),
+                    southern: app.lat < 0.0,
                 };
                 let tx = img_tx.clone();
                 std::thread::spawn(move || {
@@ -159,10 +194,12 @@ fn run(
             }
         } else {
             image_state = None;
+            image_encoded_rect = None;
             last_image_gen = u64::MAX;
             image_generating = false;
+            encode_in_flight = false;
         }
-        terminal.draw(|f| ui::render(f, &app, image_state.as_mut() as Option<&mut RatatuiImageState>))?;
+        terminal.draw(|f| ui::render(f, &app, image_state.as_mut(), image_encoded_rect))?;
 
         if event::poll(Duration::from_millis(16))?
             && let Event::Key(key) = event::read()?
@@ -264,8 +301,11 @@ fn run(
                     KeyCode::Char('i') | KeyCode::Char('I') => {
                         if matches!(app.tab, Tab::Sky) {
                             app.use_image_renderer = !app.use_image_renderer;
+                            image_state = None;
+                            image_encoded_rect = None;
                             last_image_gen = u64::MAX;
                             image_generating = false;
+                            encode_in_flight = false;
                         }
                     }
                     KeyCode::Char('r') | KeyCode::Char('R') => {

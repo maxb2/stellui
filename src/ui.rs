@@ -43,7 +43,7 @@ fn moon_phase_char(cycle_degrees: f64) -> &'static str {
     }
 }
 
-pub fn render(f: &mut Frame, app: &App, image_state: Option<&mut RatatuiImageState>) {
+pub fn render(f: &mut Frame, app: &App, image_state: Option<&mut RatatuiImageState>, image_encoded_rect: Option<Rect>) {
     let chunks = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(0),
@@ -54,7 +54,7 @@ pub fn render(f: &mut Frame, app: &App, image_state: Option<&mut RatatuiImageSta
     render_tabs(f, app, chunks[0]);
 
     match app.tab {
-        Tab::Sky => render_sky(f, app, chunks[1], image_state),
+        Tab::Sky => render_sky(f, app, chunks[1], image_state, image_encoded_rect),
         Tab::Weather => render_weather(f, app, chunks[1]),
         Tab::SolarSystem => render_solar_system(f, app, chunks[1]),
         Tab::Almanac => render_almanac(f, app, chunks[1]),
@@ -82,13 +82,13 @@ fn render_tabs(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     f.render_widget(tabs, area);
 }
 
-fn render_sky(f: &mut Frame, app: &App, area: Rect, image_state: Option<&mut RatatuiImageState>) {
+fn render_sky(f: &mut Frame, app: &App, area: Rect, image_state: Option<&mut RatatuiImageState>, image_encoded_rect: Option<Rect>) {
     let cols =
         Layout::horizontal([Constraint::Percentage(80), Constraint::Percentage(20)]).split(area);
 
     if app.use_image_renderer {
         if let Some(state) = image_state {
-            render_sky_image(f, state, cols[0]);
+            render_sky_image(f, state, cols[0], image_encoded_rect);
         }
     } else {
         render_canvas(f, app, cols[0]);
@@ -96,14 +96,16 @@ fn render_sky(f: &mut Frame, app: &App, area: Rect, image_state: Option<&mut Rat
     render_info_panel(f, app, cols[1]);
 }
 
-fn render_sky_image(f: &mut Frame, state: &mut RatatuiImageState, area: Rect) {
-    let resize = Resize::Scale(None);
-    let rendered = state.size_for(resize.clone(), area);
-    let x_off = area.width.saturating_sub(rendered.width) / 2;
-    let y_off = area.height.saturating_sub(rendered.height) / 2;
-    let centered = Rect::new(area.x + x_off, area.y + y_off, rendered.width, rendered.height);
-    let img = StatefulImage::new().resize(resize);
-    f.render_stateful_widget(img, centered, state);
+fn render_sky_image(f: &mut Frame, state: &mut RatatuiImageState, area: Rect, encoded_rect: Option<Rect>) {
+    let render_area = if let Some(enc) = encoded_rect {
+        let x_off = area.width.saturating_sub(enc.width) / 2;
+        let y_off = area.height.saturating_sub(enc.height) / 2;
+        Rect::new(area.x + x_off, area.y + y_off, enc.width, enc.height)
+    } else {
+        area
+    };
+    let img = StatefulImage::new().resize(Resize::Scale(None));
+    f.render_stateful_widget(img, render_area, state);
 }
 
 fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {

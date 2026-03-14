@@ -54,10 +54,16 @@ pub enum Tab {
 
 pub enum InputMode {
     Normal,
-    EditingLat,
-    EditingLon,
+    LocationPicker,
+    AddingLocation,
     EditingDatetime,
     EditingTimezone,
+}
+
+pub struct NewLocationDraft {
+    pub bufs: [String; 4], // [name, lat, lon, height]
+    pub field: usize,
+    pub error: Option<String>,
 }
 
 pub struct App {
@@ -78,6 +84,11 @@ pub struct App {
 
     pub test_mode: bool,
 
+    pub locations: Vec<crate::config::Location>,
+    pub location_index: usize,
+    pub picker_sel: usize,
+    pub new_loc_draft: Option<NewLocationDraft>,
+
     pub stars: Vec<RenderedStar>,
     pub sun_moon: SunMoonInfo,
     pub planets: Vec<RenderedPlanet>,
@@ -91,7 +102,12 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(lat: f64, lon: f64, height: f64, timezone_override: Option<chrono_tz::Tz>, max_mag_override: Option<f64>) -> Self {
+    pub fn new(locations: Vec<crate::config::Location>, initial_index: usize, max_mag_override: Option<f64>) -> Self {
+        let loc = &locations[initial_index];
+        let timezone_override = loc.timezone.as_deref().and_then(|s| s.parse().ok());
+        let lat = loc.lat;
+        let lon = loc.lon;
+        let height = loc.height;
         let timezone = timezone_override.or_else(|| resolve_tz(lat, lon));
         let mut app = Self {
             tab: Tab::Sky,
@@ -109,6 +125,10 @@ impl App {
             last_tick: Instant::now(),
             max_mag: max_mag_override.unwrap_or(5.5),
             test_mode: false,
+            locations,
+            location_index: initial_index,
+            picker_sel: initial_index,
+            new_loc_draft: None,
             stars: Vec::new(),
             planets: Vec::new(),
             orrery: OrreryInfo { planets: Vec::new() },
@@ -125,6 +145,18 @@ impl App {
         };
         app.recompute();
         app
+    }
+
+    pub fn switch_location(&mut self, index: usize) {
+        if index >= self.locations.len() { return; }
+        let loc = &self.locations[index];
+        let timezone_override = loc.timezone.as_deref().and_then(|s| s.parse().ok());
+        self.lat = loc.lat;
+        self.lon = loc.lon;
+        self.height = loc.height;
+        self.timezone = timezone_override.or_else(|| resolve_tz(self.lat, self.lon));
+        self.location_index = index;
+        self.recompute();
     }
 
     pub fn recompute(&mut self) {

@@ -1,15 +1,15 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout},
+    layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Paragraph, Row, Sparkline, Table, TableState, Tabs,
+        Block, Borders, Clear, Paragraph, Row, Sparkline, Table, TableState, Tabs,
         canvas::{Canvas, Circle, Line as CanvasLine, Points},
     },
 };
 
-use crate::app::{App, InputMode, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab};
+use crate::app::{App, InputMode, NewLocationDraft, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab};
 use crate::sky::{self, ALMANAC_STEPS};
 use stellui::astro::CartesianCoordinates;
 
@@ -59,6 +59,13 @@ pub fn render(f: &mut Frame, app: &App) {
     }
 
     render_status(f, app, chunks[2]);
+
+    // Overlays
+    match app.input_mode {
+        InputMode::LocationPicker => render_location_picker(f, app),
+        InputMode::AddingLocation => render_add_location(f, app),
+        _ => {}
+    }
 }
 
 fn render_tabs(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -544,18 +551,18 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         String::new()
     };
 
+    let loc_name = app.locations.get(app.location_index).map(|l| l.name.as_str()).unwrap_or("");
+
     let editing_hint = match app.input_mode {
-        InputMode::Normal => String::new(),
-        InputMode::EditingLat => format!(" Editing lat: {}_", app.input_buf),
-        InputMode::EditingLon => format!(" Editing lon: {}_", app.input_buf),
+        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation => String::new(),
         InputMode::EditingDatetime => format!(" Editing time (local): {}_", app.input_buf),
         InputMode::EditingTimezone => format!(" Editing timezone: {}_", app.input_buf),
     };
 
     let line1 = if editing_hint.is_empty() {
         format!(
-            " Lat:{:.4} Lon:{:.4}  {}{}{}",
-            app.lat, app.lon, dt_str, local_str, mode_str
+            " {} Lat:{:.4} Lon:{:.4}  {}{}{}",
+            loc_name, app.lat, app.lon, dt_str, local_str, mode_str
         )
     } else {
         editing_hint
@@ -563,13 +570,13 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let line2 = match app.tab {
         Tab::Sky =>
-            " [L]lat [O]lon [T]time [Z]tz [N]now [Space]pause [,/.]speed [+/-]mag [D]orion [S/W/P/A]tab [Q]quit",
+            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [+/-]mag [D]orion [S/W/P/A]tab [Q]quit",
         Tab::Weather =>
-            " [L]lat [O]lon [R]weather [↑/↓]scroll [S/W/P/A]tab [Q]quit",
+            " [L]locations [R]weather [↑/↓]scroll [S/W/P/A]tab [Q]quit",
         Tab::SolarSystem =>
-            " [L]lat [O]lon [T]time [Z]tz [N]now [Space]pause [,/.]speed [S/W/P/A]tab [Q]quit",
+            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [S/W/P/A]tab [Q]quit",
         Tab::Almanac =>
-            " [L]lat [O]lon [T]time [Z]tz [N]now [Space]pause [,/.]speed [S/W/P/A]tab [Q]quit",
+            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [S/W/P/A]tab [Q]quit",
     };
 
     let text = vec![Line::from(line1), Line::from(line2)];
@@ -701,6 +708,85 @@ fn render_almanac_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         });
 
     f.render_widget(canvas, area);
+}
+
+fn centered_popup(f: &Frame, width_pct: u16, height: u16) -> Rect {
+    let area = f.area();
+    let popup_w = (area.width * width_pct / 100).max(40);
+    let popup_h = height.min(area.height.saturating_sub(4));
+    let x = area.x + (area.width.saturating_sub(popup_w)) / 2;
+    let y = area.y + (area.height.saturating_sub(popup_h)) / 2;
+    Rect { x, y, width: popup_w, height: popup_h }
+}
+
+fn render_location_picker(f: &mut Frame, app: &App) {
+    let height = (app.locations.len() as u16 + 6).min(20);
+    let area = centered_popup(f, 60, height);
+    f.render_widget(Clear, area);
+
+    let block = Block::default().borders(Borders::ALL).title(" Locations ");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let list_height = inner.height.saturating_sub(2) as usize; // reserve 2 rows for hints
+    let _ = list_height;
+
+    let mut lines: Vec<Line> = app.locations.iter().enumerate().map(|(i, loc)| {
+        let marker = if i == app.picker_sel { "►" } else { " " };
+        let text = format!(" {} {} ({:.4}, {:.4})", marker, loc.name, loc.lat, loc.lon);
+        if i == app.picker_sel {
+            Line::from(Span::styled(text, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)))
+        } else {
+            Line::from(text)
+        }
+    }).collect();
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        " [↑/↓]select  [Enter]use  [n]add  [d]delete  [Esc]cancel",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let para = Paragraph::new(lines);
+    f.render_widget(para, inner);
+}
+
+fn render_add_location(f: &mut Frame, app: &App) {
+    let area = centered_popup(f, 60, 12);
+    f.render_widget(Clear, area);
+
+    let block = Block::default().borders(Borders::ALL).title(" Add Location ");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let draft: &NewLocationDraft = app.new_loc_draft.as_ref().unwrap();
+    let field_names = ["Name", "Lat", "Lon", "Height (m)"];
+    let mut lines: Vec<Line> = field_names.iter().enumerate().map(|(i, label)| {
+        let cursor = if i == draft.field { "_" } else { "" };
+        let text = format!(" {}: {}{}", label, draft.bufs[i], cursor);
+        if i == draft.field {
+            Line::from(Span::styled(text, Style::default().fg(Color::Yellow)))
+        } else {
+            Line::from(text)
+        }
+    }).collect();
+
+    lines.push(Line::from(""));
+    if let Some(err) = &draft.error {
+        lines.push(Line::from(Span::styled(
+            format!(" Error: {}", err),
+            Style::default().fg(Color::Red),
+        )));
+    } else {
+        lines.push(Line::from(""));
+    }
+    lines.push(Line::from(Span::styled(
+        " [Tab/↓]next  [↑]prev  [Enter]next/confirm  [Esc]cancel",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let para = Paragraph::new(lines);
+    f.render_widget(para, inner);
 }
 
 fn render_almanac_legend(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {

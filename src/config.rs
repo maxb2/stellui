@@ -1,11 +1,19 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Default, Deserialize)]
-pub struct Config {
-    pub lat: Option<f64>,
-    pub lon: Option<f64>,
-    pub height: Option<f64>,
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Location {
+    pub name: String,
+    pub lat: f64,
+    pub lon: f64,
+    #[serde(default)]
+    pub height: f64,
     pub timezone: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct Config {
+    #[serde(default)]
+    pub locations: Vec<Location>,
     pub max_mag: Option<f64>,
 }
 
@@ -36,4 +44,31 @@ impl Config {
         toml::from_str(&text).unwrap_or_default()
     }
 
+    pub fn effective_locations(&self) -> Vec<Location> {
+        if !self.locations.is_empty() {
+            self.locations.clone()
+        } else {
+            vec![Location {
+                name: "New York".to_string(),
+                lat: 40.71,
+                lon: -74.01,
+                height: 0.0,
+                timezone: None,
+            }]
+        }
+    }
+
+    pub fn save(locations: &[Location], max_mag: Option<f64>) {
+        let Some(path) = config_path() else { return };
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let cfg = Config {
+            locations: locations.to_vec(),
+            max_mag,
+        };
+        if let Ok(text) = toml::to_string(&cfg) {
+            let _ = std::fs::write(&path, text);
+        }
+    }
 }

@@ -58,6 +58,7 @@ pub enum InputMode {
     AddingLocation,
     EditingDatetime,
     EditingTimezone,
+    AlmanacBodyPicker,
 }
 
 pub struct NewLocationDraft {
@@ -94,6 +95,9 @@ pub struct App {
     pub planets: Vec<RenderedPlanet>,
     pub orrery: OrreryInfo,
     pub almanac: AlmanacInfo,
+
+    pub selected_bodies: Vec<bool>,
+    pub almanac_picker_sel: usize,
 
     pub forecasts: Option<Vec<HourlyForecast>>,
     pub weather_loading: bool,
@@ -133,6 +137,8 @@ impl App {
             planets: Vec::new(),
             orrery: OrreryInfo { planets: Vec::new() },
             almanac: AlmanacInfo { tracks: Vec::new(), current_step: 0 },
+            selected_bodies: Vec::new(),
+            almanac_picker_sel: 0,
             sun_moon: SunMoonInfo {
                 sun_stereo: None,
                 moon_stereo: None,
@@ -173,6 +179,9 @@ impl App {
         self.orrery = sky::compute_orrery(self.datetime);
         if matches!(self.tab, Tab::Almanac) {
             self.almanac = sky::compute_almanac(self.lat, self.lon, self.height, self.datetime, self.timezone);
+            while self.selected_bodies.len() < self.almanac.tracks.len() {
+                self.selected_bodies.push(true);
+            }
         }
     }
 }

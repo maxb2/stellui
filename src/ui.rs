@@ -64,6 +64,7 @@ pub fn render(f: &mut Frame, app: &App) {
     match app.input_mode {
         InputMode::LocationPicker => render_location_picker(f, app),
         InputMode::AddingLocation => render_add_location(f, app),
+        InputMode::AlmanacBodyPicker => render_almanac_body_picker(f, app),
         _ => {}
     }
 }
@@ -554,7 +555,7 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let loc_name = app.locations.get(app.location_index).map(|l| l.name.as_str()).unwrap_or("");
 
     let editing_hint = match app.input_mode {
-        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation => String::new(),
+        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation | InputMode::AlmanacBodyPicker => String::new(),
         InputMode::EditingDatetime => format!(" Editing time (local): {}_", app.input_buf),
         InputMode::EditingTimezone => format!(" Editing timezone: {}_", app.input_buf),
     };
@@ -576,7 +577,7 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Tab::SolarSystem =>
             " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [S/W/P/A]tab [Q]quit",
         Tab::Almanac =>
-            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [S/W/P/A]tab [Q]quit",
+            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [b]bodies [S/W/P/A]tab [Q]quit",
     };
 
     let text = vec![Line::from(line1), Line::from(line2)];
@@ -600,7 +601,10 @@ fn render_almanac_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
 
     // Pre-compute arc segments: Vec<(x1, y1, x2, y2, r, g, b)>
     let mut segments: Vec<(f64, f64, f64, f64, u8, u8, u8)> = Vec::new();
-    for track in &almanac.tracks {
+    for (idx, track) in almanac.tracks.iter().enumerate() {
+        if !app.selected_bodies.get(idx).copied().unwrap_or(true) {
+            continue;
+        }
         let (base_r, base_g, base_b) = track.color_rgb;
         for k in 0..96usize {
             let idx0 = (current_step + k) % ALMANAC_STEPS;
@@ -789,6 +793,43 @@ fn render_add_location(f: &mut Frame, app: &App) {
     f.render_widget(para, inner);
 }
 
+fn render_almanac_body_picker(f: &mut Frame, app: &App) {
+    let n = app.almanac.tracks.len() as u16;
+    let height = n + 4;
+    let area = centered_popup(f, 35, height);
+    f.render_widget(Clear, area);
+
+    let block = Block::default().borders(Borders::ALL).title(" Bodies [b] ");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let mut lines: Vec<Line> = app.almanac.tracks.iter().enumerate().map(|(i, track)| {
+        let checked = app.selected_bodies.get(i).copied().unwrap_or(true);
+        let check = if checked { "✓" } else { " " };
+        let text = format!(" [{}] {} {}", check, track.symbol, track.name);
+        let (r, g, b) = track.color_rgb;
+        if i == app.almanac_picker_sel {
+            Line::from(vec![
+                Span::styled(text, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled("  ■", Style::default().fg(Color::Rgb(r, g, b))),
+            ])
+        } else if checked {
+            Line::from(Span::styled(text, Style::default().fg(Color::Rgb(r, g, b))))
+        } else {
+            Line::from(Span::styled(text, Style::default().fg(Color::DarkGray)))
+        }
+    }).collect();
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        " Space toggle · Esc close",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let para = Paragraph::new(lines);
+    f.render_widget(para, inner);
+}
+
 fn render_almanac_legend(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let mut text = vec![
         Line::from(Span::styled(
@@ -811,7 +852,8 @@ fn render_almanac_legend(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         )),
     ];
 
-    for track in &app.almanac.tracks {
+    for (i, track) in app.almanac.tracks.iter().enumerate() {
+        let visible = app.selected_bodies.get(i).copied().unwrap_or(true);
         let alt = track.altitudes[app.almanac.current_step];
         let (r, g, b) = track.color_rgb;
         let label = if alt > 0.0 {
@@ -819,10 +861,12 @@ fn render_almanac_legend(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         } else {
             format!(" {} {} below", track.symbol, track.name)
         };
-        text.push(Line::from(Span::styled(
-            label,
-            Style::default().fg(Color::Rgb(r, g, b)),
-        )));
+        let style = if visible {
+            Style::default().fg(Color::Rgb(r, g, b))
+        } else {
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
+        };
+        text.push(Line::from(Span::styled(label, style)));
     }
 
     let para =

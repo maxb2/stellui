@@ -158,6 +158,13 @@ fn run(
                     KeyCode::Char('a') | KeyCode::Char('A') => {
                         app.tab = Tab::Almanac;
                         app.almanac = sky::compute_almanac(app.lat, app.lon, app.height, app.datetime, app.timezone);
+                        while app.selected_bodies.len() < app.almanac.tracks.len() {
+                            app.selected_bodies.push(true);
+                        }
+                    }
+                    KeyCode::Char('b') | KeyCode::Char('B') if matches!(app.tab, Tab::Almanac) => {
+                        app.input_mode = InputMode::AlmanacBodyPicker;
+                        app.almanac_picker_sel = 0;
                     }
                     KeyCode::Char('l') | KeyCode::Char('L') => {
                         app.input_mode = InputMode::LocationPicker;
@@ -360,6 +367,29 @@ fn run(
                         _ => {}
                     }
                 }
+                InputMode::AlmanacBodyPicker => match key.code {
+                    KeyCode::Esc => {
+                        app.input_mode = InputMode::Normal;
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if app.almanac_picker_sel > 0 { app.almanac_picker_sel -= 1; }
+                        else { app.almanac_picker_sel = app.almanac.tracks.len().saturating_sub(1); }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if app.almanac_picker_sel + 1 < app.almanac.tracks.len() {
+                            app.almanac_picker_sel += 1;
+                        } else {
+                            app.almanac_picker_sel = 0;
+                        }
+                    }
+                    KeyCode::Char(' ') | KeyCode::Enter => {
+                        let sel = app.almanac_picker_sel;
+                        if let Some(v) = app.selected_bodies.get_mut(sel) {
+                            *v = !*v;
+                        }
+                    }
+                    _ => {}
+                },
                 InputMode::EditingDatetime | InputMode::EditingTimezone => {
                     match key.code {
                         KeyCode::Esc => {
@@ -413,6 +443,6 @@ fn apply_input(app: &mut App) {
                 app.timezone = Some(tz);
             }
         }
-        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation => {}
+        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation | InputMode::AlmanacBodyPicker => {}
     }
 }

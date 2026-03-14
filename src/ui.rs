@@ -283,44 +283,28 @@ fn render_weather(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     .split(area);
 
     let left_chunks = Layout::vertical([
-        Constraint::Length(8),
-        Constraint::Length(8),
-        Constraint::Length(8),
-        Constraint::Length(8),
-        Constraint::Length(8),
+        Constraint::Length(6),
+        Constraint::Length(6),
+        Constraint::Length(6),
+        Constraint::Length(6),
+        Constraint::Length(6),
+        Constraint::Length(6),
         Constraint::Min(0),
     ])
     .split(cols[0]);
 
     // Time formatter: API returns UTC; convert to observer local time via app.timezone
     use chrono::{NaiveDateTime, TimeZone, Utc};
-    let first_local_date = forecasts.first()
-        .and_then(|f| NaiveDateTime::parse_from_str(&f.time, "%Y-%m-%dT%H:%M").ok())
-        .map(|ndt| {
-            if let Some(tz) = app.timezone {
-                Utc.from_utc_datetime(&ndt).with_timezone(&tz).date_naive()
-            } else {
-                ndt.date()
-            }
-        });
     let format_time = |time_str: &str| -> String {
         let Ok(ndt) = NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M") else {
             return time_str.get(11..16).unwrap_or(time_str).to_string();
         };
         if let Some(tz) = app.timezone {
             let local_dt = Utc.from_utc_datetime(&ndt).with_timezone(&tz);
-            if first_local_date == Some(local_dt.date_naive()) {
-                local_dt.format("%H:%M").to_string()
-            } else {
-                local_dt.format("%a %H:%M").to_string()
-            }
+            local_dt.format("%a %H:%M").to_string()
         } else {
             // No timezone info — show UTC
-            if first_local_date == Some(ndt.date()) {
-                ndt.format("%H:%M").to_string()
-            } else {
-                ndt.format("%a %H:%M").to_string()
-            }
+            ndt.format("%a %H:%M").to_string()
         }
     };
 
@@ -366,45 +350,65 @@ fn render_weather(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .max(vis_max)
         .style(Style::default().fg(Color::Green));
 
+    let wind_data: Vec<u64> = forecasts.iter().map(|f| f.wind_speed_kmh as u64).collect();
+    let wind_max = wind_data.iter().cloned().max().unwrap_or(1).max(1);
+    let wind_sparkline = Sparkline::default()
+        .block(Block::default().borders(Borders::ALL).title(" Wind Speed (km/h) "))
+        .data(&wind_data)
+        .max(wind_max)
+        .style(Style::default().fg(Color::Magenta));
+
     f.render_widget(cloud_sparkline,    left_chunks[0]);
     f.render_widget(humidity_sparkline, left_chunks[1]);
     f.render_widget(precip_sparkline,   left_chunks[2]);
     f.render_widget(temp_sparkline,     left_chunks[3]);
     f.render_widget(vis_sparkline,      left_chunks[4]);
+    f.render_widget(wind_sparkline,     left_chunks[5]);
 
     // Table (right panel)
-    let header = Row::new(vec!["Time", "Cld", "Hum", "Prc", "Vis", "Tmp", "Seeing"])
+    use ratatui::widgets::Cell;
+    let header = Row::new(vec!["Sky", "Time", "Cld", "Hum", "Prc", "Vis", "Tmp", "Wnd", "Seeing"])
         .style(Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED));
 
     let rows: Vec<Row> = forecasts
         .iter()
         .map(|f| {
-            use crate::weather::SeeingQuality;
-            let color = match f.seeing {
+            use crate::weather::{DayPeriod, SeeingQuality};
+            let seeing_color = match f.seeing {
                 SeeingQuality::Excellent | SeeingQuality::Good => Color::Green,
                 SeeingQuality::Fair => Color::Yellow,
                 SeeingQuality::Poor | SeeingQuality::Bad => Color::Red,
             };
+            let sky_color = match f.day_period {
+                DayPeriod::Day => Color::Yellow,
+                DayPeriod::CivilTwilight => Color::Rgb(255, 165, 0),
+                DayPeriod::NauticalTwilight => Color::Rgb(100, 140, 210),
+                DayPeriod::AstronomicalTwilight => Color::Blue,
+                DayPeriod::Night => Color::Rgb(80, 80, 160),
+            };
             Row::new(vec![
-                format_time(&f.time),
-                format!("{:.0}", f.cloud_cover),
-                format!("{:.0}", f.relative_humidity),
-                format!("{:.0}", f.precip_probability),
-                format!("{:.1}", f.visibility_km),
-                format!("{:.1}", f.temperature_c),
-                f.seeing.label().to_string(),
+                Cell::new(f.day_period.symbol()).style(Style::default().fg(sky_color)),
+                Cell::new(format_time(&f.time)).style(Style::default().fg(seeing_color)),
+                Cell::new(format!("{:.0}", f.cloud_cover)).style(Style::default().fg(seeing_color)),
+                Cell::new(format!("{:.0}", f.relative_humidity)).style(Style::default().fg(seeing_color)),
+                Cell::new(format!("{:.0}", f.precip_probability)).style(Style::default().fg(seeing_color)),
+                Cell::new(format!("{:.1}", f.visibility_km)).style(Style::default().fg(seeing_color)),
+                Cell::new(format!("{:.1}", f.temperature_c)).style(Style::default().fg(seeing_color)),
+                Cell::new(format!("{:.0}", f.wind_speed_kmh)).style(Style::default().fg(seeing_color)),
+                Cell::new(f.seeing.label().to_string()).style(Style::default().fg(seeing_color)),
             ])
-            .style(Style::default().fg(color))
         })
         .collect();
 
     let widths = [
+        Constraint::Length(3),
         Constraint::Length(9),
         Constraint::Length(4),
         Constraint::Length(4),
         Constraint::Length(4),
         Constraint::Length(6),
         Constraint::Length(6),
+        Constraint::Length(4),
         Constraint::Min(5),
     ];
 

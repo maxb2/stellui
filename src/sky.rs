@@ -18,6 +18,8 @@ pub struct RenderedStar {
     pub x: f64,
     pub y: f64,
     pub mag: f64,
+    pub alt: f64, // degrees, altitude above horizon (guaranteed >= 0)
+    pub az: f64,  // degrees, 0=N 90=E
 }
 
 pub struct RenderedPlanet {
@@ -26,12 +28,18 @@ pub struct RenderedPlanet {
     pub x: f64,
     pub y: f64,
     pub mag: f64,
+    pub alt: f64,
+    pub az: f64,
 }
 
 pub struct SunMoonInfo {
     pub sun_stereo: Option<PolarCoordinates>,
     pub moon_stereo: Option<PolarCoordinates>,
     pub moon_cycle_degrees: f64,
+    pub sun_alt: f64,
+    pub sun_az: f64,
+    pub moon_alt: f64,
+    pub moon_az: f64,
 }
 
 pub fn compute_stars(
@@ -64,12 +72,16 @@ pub fn compute_stars(
             if polar.rad > 2.0 {
                 return None;
             }
+            let alt = 90.0 - 2.0 * (polar.rad / 2.0).atan().to_degrees();
+            let az = polar.phi;
             let oriented = polar.canvas_orient_for(lat < 0.0);
             let cart = CartesianCoordinates::from(oriented);
             Some(RenderedStar {
                 x: cart.x,
                 y: cart.y,
                 mag: star.mag,
+                alt,
+                az,
             })
         })
         .collect()
@@ -141,6 +153,8 @@ pub fn compute_planets(
                 x: cart.x,
                 y: cart.y,
                 mag,
+                alt: hor.altitude,
+                az: hor.azimuth,
             })
         })
         .collect()
@@ -315,5 +329,9 @@ pub fn compute_sun_moon(lat: f64, lon: f64, height: f64, datetime: DateTime<Utc>
         sun_stereo: to_opt(&smp.sun_hor),
         moon_stereo: to_opt(&smp.moon_hor),
         moon_cycle_degrees: smp.moon_cycle_degrees,
+        sun_alt: smp.sun_hor.altitude,
+        sun_az: smp.sun_hor.azimuth,
+        moon_alt: smp.moon_hor.altitude,
+        moon_az: smp.moon_hor.azimuth,
     }
 }

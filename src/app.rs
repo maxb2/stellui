@@ -59,10 +59,17 @@ pub enum InputMode {
     EditingDatetime,
     EditingTimezone,
     AlmanacBodyPicker,
+    FovInput,
 }
 
 pub struct NewLocationDraft {
     pub bufs: [String; 4], // [name, lat, lon, height]
+    pub field: usize,
+    pub error: Option<String>,
+}
+
+pub struct FovDraft {
+    pub bufs: [String; 3], // [alt_deg, az_deg, fov_deg]
     pub field: usize,
     pub error: Option<String>,
 }
@@ -103,6 +110,12 @@ pub struct App {
     pub weather_loading: bool,
     pub weather_error: Option<String>,
     pub weather_scroll: usize,
+
+    pub fov_active: bool,
+    pub fov_alt: f64,
+    pub fov_az: f64,
+    pub fov_deg: f64,
+    pub fov_draft: Option<FovDraft>,
 }
 
 impl App {
@@ -143,11 +156,20 @@ impl App {
                 sun_stereo: None,
                 moon_stereo: None,
                 moon_cycle_degrees: 0.0,
+                sun_alt: 0.0,
+                sun_az: 0.0,
+                moon_alt: 0.0,
+                moon_az: 0.0,
             },
             forecasts: None,
             weather_loading: false,
             weather_error: None,
             weather_scroll: 0,
+            fov_active: false,
+            fov_alt: 45.0,
+            fov_az: 180.0,
+            fov_deg: 30.0,
+            fov_draft: None,
         };
         app.recompute();
         app

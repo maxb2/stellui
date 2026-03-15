@@ -17,7 +17,7 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use app::{App, InputMode, NewLocationDraft, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab};
+use app::{App, FovDraft, InputMode, NewLocationDraft, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab};
 use config::Location;
 use weather::HourlyForecast;
 
@@ -166,6 +166,31 @@ fn run(
                         app.input_mode = InputMode::AlmanacBodyPicker;
                         app.almanac_picker_sel = 0;
                     }
+                    KeyCode::Char('f') | KeyCode::Char('F') if matches!(app.tab, Tab::Sky) => {
+                        if app.fov_active {
+                            app.fov_active = false;
+                        } else {
+                            app.fov_draft = Some(FovDraft {
+                                bufs: [
+                                    format!("{:.1}", app.fov_alt),
+                                    format!("{:.1}", app.fov_az),
+                                    format!("{:.1}", app.fov_deg),
+                                ],
+                                field: 0,
+                                error: None,
+                            });
+                            app.input_mode = InputMode::FovInput;
+                        }
+                    }
+                    KeyCode::Esc if app.fov_active => {
+                        app.fov_active = false;
+                    }
+                    KeyCode::Char('[') if app.fov_active && matches!(app.tab, Tab::Sky) => {
+                        app.fov_deg = (app.fov_deg * 1.5).min(90.0);
+                    }
+                    KeyCode::Char(']') if app.fov_active && matches!(app.tab, Tab::Sky) => {
+                        app.fov_deg = (app.fov_deg / 1.5).max(1.0);
+                    }
                     KeyCode::Char('l') | KeyCode::Char('L') => {
                         app.input_mode = InputMode::LocationPicker;
                         app.picker_sel = app.location_index;
@@ -242,16 +267,38 @@ fn run(
                         }
                     }
                     KeyCode::Up => {
-                        app.weather_scroll = app.weather_scroll.saturating_sub(1);
+                        if app.fov_active && matches!(app.tab, Tab::Sky) {
+                            let step = (app.fov_deg / 6.0).max(0.5);
+                            app.fov_alt = (app.fov_alt + step).min(90.0);
+                        } else {
+                            app.weather_scroll = app.weather_scroll.saturating_sub(1);
+                        }
                     }
                     KeyCode::Down => {
-                        let max = app
-                            .forecasts
-                            .as_ref()
-                            .map(|f| f.len().saturating_sub(1))
-                            .unwrap_or(0);
-                        if app.weather_scroll < max {
-                            app.weather_scroll += 1;
+                        if app.fov_active && matches!(app.tab, Tab::Sky) {
+                            let step = (app.fov_deg / 6.0).max(0.5);
+                            app.fov_alt = (app.fov_alt - step).max(-90.0);
+                        } else {
+                            let max = app
+                                .forecasts
+                                .as_ref()
+                                .map(|f| f.len().saturating_sub(1))
+                                .unwrap_or(0);
+                            if app.weather_scroll < max {
+                                app.weather_scroll += 1;
+                            }
+                        }
+                    }
+                    KeyCode::Left => {
+                        if app.fov_active && matches!(app.tab, Tab::Sky) {
+                            let step = (app.fov_deg / 6.0).max(0.5);
+                            app.fov_az = (app.fov_az - step).rem_euclid(360.0);
+                        }
+                    }
+                    KeyCode::Right => {
+                        if app.fov_active && matches!(app.tab, Tab::Sky) {
+                            let step = (app.fov_deg / 6.0).max(0.5);
+                            app.fov_az = (app.fov_az + step).rem_euclid(360.0);
                         }
                     }
                     _ => {}
@@ -390,6 +437,51 @@ fn run(
                     }
                     _ => {}
                 },
+                InputMode::FovInput => {
+                    let draft = app.fov_draft.as_mut().unwrap();
+                    match key.code {
+                        KeyCode::Esc => {
+                            app.fov_draft = None;
+                            app.input_mode = InputMode::Normal;
+                        }
+                        KeyCode::Tab | KeyCode::Down => {
+                            if draft.field < 2 { draft.field += 1; }
+                        }
+                        KeyCode::Up => {
+                            if draft.field > 0 { draft.field -= 1; }
+                        }
+                        KeyCode::Backspace => {
+                            draft.bufs[draft.field].pop();
+                        }
+                        KeyCode::Char(c) => {
+                            draft.bufs[draft.field].push(c);
+                        }
+                        KeyCode::Enter => {
+                            let draft = app.fov_draft.as_mut().unwrap();
+                            if draft.field < 2 {
+                                draft.field += 1;
+                            } else {
+                                let alt_v = draft.bufs[0].trim().parse::<f64>().ok()
+                                    .filter(|v| v.abs() <= 90.0);
+                                let az_v  = draft.bufs[1].trim().parse::<f64>().ok()
+                                    .filter(|v| *v >= 0.0 && *v < 360.0);
+                                let fov_v = draft.bufs[2].trim().parse::<f64>().ok()
+                                    .filter(|v| *v >= 1.0 && *v <= 90.0);
+                                if let (Some(alt), Some(az), Some(fov)) = (alt_v, az_v, fov_v) {
+                                    app.fov_alt = alt;
+                                    app.fov_az = az;
+                                    app.fov_deg = fov;
+                                    app.fov_active = true;
+                                    app.fov_draft = None;
+                                    app.input_mode = InputMode::Normal;
+                                } else {
+                                    draft.error = Some("Alt:-90..90  Az:0..360  FoV:1..90".to_string());
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
                 InputMode::EditingDatetime | InputMode::EditingTimezone => {
                     match key.code {
                         KeyCode::Esc => {
@@ -443,6 +535,6 @@ fn apply_input(app: &mut App) {
                 app.timezone = Some(tz);
             }
         }
-        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation | InputMode::AlmanacBodyPicker => {}
+        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation | InputMode::AlmanacBodyPicker | InputMode::FovInput => {}
     }
 }

@@ -9,9 +9,40 @@ use ratatui::{
     },
 };
 
-use crate::app::{App, InputMode, NewLocationDraft, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab};
+use crate::app::{App, FovDraft, InputMode, NewLocationDraft, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab};
 use crate::sky::{self, ALMANAC_STEPS};
 use stellui::astro::CartesianCoordinates;
+
+/// Tangent-plane (gnomonic) projection.
+/// xi > 0 = east; eta > 0 = up. Returns None if behind the projection plane.
+fn gnomonic_project(obj_alt: f64, obj_az: f64, calt: f64, caz: f64) -> Option<(f64, f64)> {
+    let (ar, zr) = (obj_alt.to_radians(), obj_az.to_radians());
+    let (cr, czr) = (calt.to_radians(), caz.to_radians());
+    let vx = ar.cos() * zr.sin();
+    let vy = ar.cos() * zr.cos();
+    let vz = ar.sin();
+    let cx = cr.cos() * czr.sin();
+    let cy = cr.cos() * czr.cos();
+    let cz = cr.sin();
+    let dot = cx * vx + cy * vy + cz * vz;
+    if dot <= 0.0 { return None; }
+    let xi  = (czr.cos() * vx - czr.sin() * vy) / dot;
+    let eta = (-cr.sin() * czr.sin() * vx - cr.sin() * czr.cos() * vy + cr.cos() * vz) / dot;
+    Some((xi, eta))
+}
+
+/// Project and scale to canvas [-1, 1] bounds; returns None if outside.
+fn project_and_scale(alt: f64, az: f64, calt: f64, caz: f64, scale: f64) -> Option<(f64, f64)> {
+    let (xi, eta) = gnomonic_project(alt, az, calt, caz)?;
+    let (cx, cy) = (xi * scale, eta * scale);
+    if cx.abs() > 1.0 || cy.abs() > 1.0 { return None; }
+    Some((cx, cy))
+}
+
+fn fov_tick_spacing(fov: f64) -> usize {
+    if fov > 60.0 { 30 } else if fov > 30.0 { 10 } else if fov > 10.0 { 5 }
+    else if fov > 5.0 { 2 } else { 1 }
+}
 
 fn planet_color(name: &str) -> Color {
     match name {
@@ -65,6 +96,7 @@ pub fn render(f: &mut Frame, app: &App) {
         InputMode::LocationPicker => render_location_picker(f, app),
         InputMode::AddingLocation => render_add_location(f, app),
         InputMode::AlmanacBodyPicker => render_almanac_body_picker(f, app),
+        InputMode::FovInput => render_fov_input(f, app),
         _ => {}
     }
 }
@@ -92,7 +124,11 @@ fn render_sky(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let cols =
         Layout::horizontal([Constraint::Percentage(80), Constraint::Percentage(20)]).split(area);
 
-    render_canvas(f, app, cols[0]);
+    if app.fov_active {
+        render_fov_canvas(f, app, cols[0]);
+    } else {
+        render_canvas(f, app, cols[0]);
+    }
     render_info_panel(f, app, cols[1]);
 }
 
@@ -212,6 +248,176 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         });
 
     f.render_widget(canvas, area);
+}
+
+fn render_fov_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let calt = app.fov_alt;
+    let caz = app.fov_az;
+    let fov_deg = app.fov_deg;
+    let scale = 1.0 / (fov_deg / 2.0).to_radians().tan();
+
+    // Project stars into brightness buckets
+    let bright: Vec<(f64, f64)> = app.stars.iter()
+        .filter(|s| s.mag <= 2.0)
+        .filter_map(|s| project_and_scale(s.alt, s.az, calt, caz, scale))
+        .collect();
+    let medium: Vec<(f64, f64)> = app.stars.iter()
+        .filter(|s| s.mag > 2.0 && s.mag <= 4.0)
+        .filter_map(|s| project_and_scale(s.alt, s.az, calt, caz, scale))
+        .collect();
+    let dim: Vec<(f64, f64)> = app.stars.iter()
+        .filter(|s| s.mag > 4.0)
+        .filter_map(|s| project_and_scale(s.alt, s.az, calt, caz, scale))
+        .collect();
+
+    // Project planets
+    let planet_positions: Vec<(&str, &str, f64, f64, ratatui::style::Color)> = app.planets.iter()
+        .filter_map(|p| {
+            let (cx, cy) = project_and_scale(p.alt, p.az, calt, caz, scale)?;
+            Some((p.name, p.symbol, cx, cy, planet_color(p.name)))
+        })
+        .collect();
+
+    // Project sun and moon
+    let sun_fov_pos = if app.sun_moon.sun_alt >= 0.0 {
+        project_and_scale(app.sun_moon.sun_alt, app.sun_moon.sun_az, calt, caz, scale)
+    } else {
+        None
+    };
+    let moon_fov_pos = if app.sun_moon.moon_alt >= 0.0 {
+        project_and_scale(app.sun_moon.moon_alt, app.sun_moon.moon_az, calt, caz, scale)
+    } else {
+        None
+    };
+    let phase_angle = app.sun_moon.moon_cycle_degrees;
+
+    // Horizon line: all horizon points project to y = -tan(calt) * scale
+    let y_horiz = -calt.to_radians().tan() * scale;
+    let horizon_visible = y_horiz.abs() <= 1.0 && calt.abs() < 89.0;
+
+    // Az ticks along the horizon line
+    let az_ticks: Vec<(f64, Option<String>)> = if horizon_visible {
+        let tick_step = fov_tick_spacing(fov_deg);
+        (0u32..360).step_by(tick_step)
+            .filter_map(|az_tick| {
+                let (cx, _) = gnomonic_project(0.0, az_tick as f64, calt, caz)?;
+                let cx = cx * scale;
+                if cx.abs() > 1.0 { return None; }
+                let label: Option<String> = match az_tick {
+                    0 => Some("N".to_string()),
+                    90 => Some("E".to_string()),
+                    180 => Some("S".to_string()),
+                    270 => Some("W".to_string()),
+                    d => Some(format!("{d}°")),
+                };
+                Some((cx, label))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let title = format!(
+        " FoV: alt={:.1}° az={:.1}° fov={:.1}° | [↑↓←→]pan [[]out []]in [f/Esc]exit ",
+        calt, caz, fov_deg
+    );
+
+    let canvas = Canvas::default()
+        .block(Block::default().borders(Borders::ALL).title(title))
+        .x_bounds([-1.0, 1.0])
+        .y_bounds([-1.0, 1.0])
+        .background_color(Color::Black)
+        .paint(move |ctx| {
+            // Crosshair
+            ctx.draw(&CanvasLine { x1: -0.05, y1: 0.0, x2: 0.05, y2: 0.0, color: Color::DarkGray });
+            ctx.draw(&CanvasLine { x1: 0.0, y1: -0.05, x2: 0.0, y2: 0.05, color: Color::DarkGray });
+
+            // Stars
+            if !dim.is_empty() {
+                ctx.draw(&Points { coords: &dim, color: Color::DarkGray });
+            }
+            if !medium.is_empty() {
+                ctx.draw(&Points { coords: &medium, color: Color::Gray });
+            }
+            if !bright.is_empty() {
+                ctx.draw(&Points { coords: &bright, color: Color::White });
+            }
+
+            // Planets
+            for (_name, symbol, x, y, color) in &planet_positions {
+                ctx.print(*x, *y, Line::from(Span::styled(*symbol, Style::default().fg(*color))));
+            }
+
+            // Sun and moon
+            if let Some((sx, sy)) = sun_fov_pos {
+                ctx.print(sx, sy, Line::from(Span::styled("🌞", Style::default().fg(Color::Yellow))));
+            }
+            if let Some((mx, my)) = moon_fov_pos {
+                ctx.print(mx, my, Line::from(Span::styled(
+                    moon_phase_char(phase_angle),
+                    Style::default().fg(Color::White),
+                )));
+            }
+
+            // Horizon line
+            if horizon_visible {
+                ctx.draw(&CanvasLine {
+                    x1: -1.0, y1: y_horiz, x2: 1.0, y2: y_horiz,
+                    color: Color::DarkGray,
+                });
+                // Az ticks and labels
+                for (cx, label) in &az_ticks {
+                    ctx.draw(&CanvasLine {
+                        x1: *cx, y1: y_horiz - 0.04,
+                        x2: *cx, y2: y_horiz + 0.04,
+                        color: Color::DarkGray,
+                    });
+                    if let Some(lbl) = label {
+                        ctx.print(*cx, y_horiz + 0.06, lbl.to_owned());
+                    }
+                }
+            }
+        });
+
+    f.render_widget(canvas, area);
+}
+
+fn render_fov_input(f: &mut Frame, app: &App) {
+    let area = centered_popup(f, 60, 10);
+    f.render_widget(Clear, area);
+
+    let block = Block::default().borders(Borders::ALL).title(" FoV Settings ");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let draft: &FovDraft = app.fov_draft.as_ref().unwrap();
+    let field_names = ["Alt (°, -90..90)", "Az (°, 0..360)", "FoV (°, 1..90)"];
+    let mut lines: Vec<Line> = field_names.iter().enumerate().map(|(i, label)| {
+        let cursor = if i == draft.field { "_" } else { "" };
+        let text = format!(" {}: {}{}", label, draft.bufs[i], cursor);
+        if i == draft.field {
+            Line::from(Span::styled(text, Style::default().fg(Color::Yellow)))
+        } else {
+            Line::from(text)
+        }
+    }).collect();
+
+    lines.push(Line::from(""));
+    if let Some(err) = &draft.error {
+        lines.push(Line::from(Span::styled(
+            format!(" Error: {}", err),
+            Style::default().fg(Color::Red),
+        )));
+    } else {
+        lines.push(Line::from(""));
+    }
+    lines.push(Line::from(Span::styled(
+        " [Tab/↓]next  [↑]prev  [Enter]next/confirm  [Esc]cancel",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let para = Paragraph::new(lines);
+    f.render_widget(para, inner);
 }
 
 fn render_info_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -555,7 +761,7 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let loc_name = app.locations.get(app.location_index).map(|l| l.name.as_str()).unwrap_or("");
 
     let editing_hint = match app.input_mode {
-        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation | InputMode::AlmanacBodyPicker => String::new(),
+        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation | InputMode::AlmanacBodyPicker | InputMode::FovInput => String::new(),
         InputMode::EditingDatetime => format!(" Editing time (local): {}_", app.input_buf),
         InputMode::EditingTimezone => format!(" Editing timezone: {}_", app.input_buf),
     };
@@ -571,7 +777,7 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let line2 = match app.tab {
         Tab::Sky =>
-            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [+/-]mag [D]orion [S/W/P/A]tab [Q]quit",
+            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [+/-]mag [D]orion [f]toggle FoV [S/W/P/A]tab [Q]quit",
         Tab::Weather =>
             " [L]locations [R]weather [↑/↓]scroll [S/W/P/A]tab [Q]quit",
         Tab::SolarSystem =>

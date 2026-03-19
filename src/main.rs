@@ -195,6 +195,9 @@ fn run(
                         app.input_mode = InputMode::LocationPicker;
                         app.picker_sel = app.location_index;
                     }
+                    KeyCode::Char('t') if matches!(app.tab, Tab::Almanac) => {
+                        app.almanac_show_times = !app.almanac_show_times;
+                    }
                     KeyCode::Char('t') | KeyCode::Char('T') => {
                         app.input_mode = InputMode::EditingDatetime;
                         app.input_buf = if let Some(tz) = app.timezone {

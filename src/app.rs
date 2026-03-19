@@ -105,6 +105,7 @@ pub struct App {
 
     pub selected_bodies: Vec<bool>,
     pub almanac_picker_sel: usize,
+    pub almanac_show_times: bool,
 
     pub forecasts: Option<Vec<HourlyForecast>>,
     pub weather_loading: bool,
@@ -152,6 +153,7 @@ impl App {
             almanac: AlmanacInfo { tracks: Vec::new(), current_step: 0 },
             selected_bodies: Vec::new(),
             almanac_picker_sel: 0,
+            almanac_show_times: false,
             sun_moon: SunMoonInfo {
                 sun_stereo: None,
                 moon_stereo: None,

@@ -314,6 +314,23 @@ fn render_fov_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         })
         .collect();
 
+    // Project Galilean moons — only render when visibly separated from Jupiter's symbol.
+    // Find Jupiter's canvas position first; moons closer than the threshold are skipped.
+    let jupiter_canvas_pos: Option<(f64, f64)> = app.planets.iter()
+        .find(|p| p.name == "Jupiter")
+        .and_then(|p| project_and_scale(p.alt, p.az, calt, caz, scale));
+    const MOON_MIN_SEP: f64 = 0.06; // canvas units (~3% of half-width)
+    let moon_positions: Vec<(&str, f64, f64)> = app.jupiter_moons.iter()
+        .filter_map(|m| {
+            let (cx, cy) = project_and_scale(m.alt, m.az, calt, caz, scale)?;
+            if let Some((jx, jy)) = jupiter_canvas_pos {
+                let dist = ((cx - jx).powi(2) + (cy - jy).powi(2)).sqrt();
+                if dist < MOON_MIN_SEP { return None; }
+            }
+            Some((m.symbol, cx, cy))
+        })
+        .collect();
+
     // Project DSOs
     let dso_fov_positions: Vec<(&str, &str, f64, f64, ratatui::style::Color)> = if app.show_dsos {
         app.dsos
@@ -396,6 +413,11 @@ fn render_fov_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             // Planets
             for (_name, symbol, x, y, color) in &planet_positions {
                 ctx.print(*x, *y, Line::from(Span::styled(*symbol, Style::default().fg(*color))));
+            }
+
+            // Galilean moons
+            for (symbol, x, y) in &moon_positions {
+                ctx.print(*x, *y, Line::from(Span::styled(*symbol, Style::default().fg(Color::Gray))));
             }
 
             // Sun and moon

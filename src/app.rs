@@ -12,7 +12,7 @@ pub fn resolve_tz(lat: f64, lon: f64) -> Option<chrono_tz::Tz> {
     if name.is_empty() { None } else { name.parse().ok() }
 }
 
-use crate::sky::{self, AlmanacInfo, BestTargetsInfo, ConjunctionsInfo, OrreryInfo, RenderedDso, RenderedPlanet, RenderedStar, SunMoonInfo};
+use crate::sky::{self, AlmanacInfo, BestTargetsInfo, ConjunctionsInfo, OrreryInfo, RenderedDso, RenderedJupiterMoon, RenderedPlanet, RenderedStar, SunMoonInfo};
 use crate::weather::HourlyForecast;
 
 /// Sky tab: seconds → days. Default index 6 = 1x real-time.
@@ -116,6 +116,7 @@ pub struct App {
     pub stars: Vec<RenderedStar>,
     pub sun_moon: SunMoonInfo,
     pub planets: Vec<RenderedPlanet>,
+    pub jupiter_moons: Vec<RenderedJupiterMoon>,
     pub dsos: Vec<RenderedDso>,
     pub show_dsos: bool,
     pub orrery: OrreryInfo,
@@ -193,6 +194,7 @@ impl App {
             new_loc_draft: None,
             stars: Vec::new(),
             planets: Vec::new(),
+            jupiter_moons: Vec::new(),
             dsos: Vec::new(),
             show_dsos: true,
             orrery: OrreryInfo { planets: Vec::new() },
@@ -268,6 +270,7 @@ impl App {
         );
         self.sun_moon = sky::compute_sun_moon(self.lat, self.lon, self.height, self.datetime);
         self.planets = sky::compute_planets(self.lat, self.lon, self.height, self.datetime);
+        self.jupiter_moons = sky::compute_jupiter_moons(self.lat, self.lon, self.height, self.datetime);
         self.dsos = sky::compute_dsos(self.lat, self.lon, self.height, self.datetime);
         self.orrery = sky::compute_orrery(self.datetime);
         if matches!(self.tab, Tab::Almanac) {

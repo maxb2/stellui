@@ -1,11 +1,11 @@
 use astronomy_engine_bindings::{
     Astronomy_AngleBetween, Astronomy_Ecliptic, Astronomy_Equator, Astronomy_GeoVector,
-    Astronomy_HelioVector, Astronomy_Horizon, Astronomy_Illumination, Astronomy_SearchRiseSetEx,
-    astro_aberration_t_ABERRATION, astro_aberration_t_NO_ABERRATION, astro_body_t_BODY_EARTH,
-    astro_body_t_BODY_JUPITER, astro_body_t_BODY_MARS, astro_body_t_BODY_MERCURY,
-    astro_body_t_BODY_MOON, astro_body_t_BODY_NEPTUNE, astro_body_t_BODY_SATURN,
-    astro_body_t_BODY_SUN, astro_body_t_BODY_URANUS, astro_body_t_BODY_VENUS,
-    astro_direction_t_DIRECTION_RISE, astro_direction_t_DIRECTION_SET,
+    Astronomy_HelioVector, Astronomy_Horizon, Astronomy_Illumination, Astronomy_JupiterMoons,
+    Astronomy_SearchRiseSetEx, astro_aberration_t_ABERRATION, astro_aberration_t_NO_ABERRATION,
+    astro_body_t_BODY_EARTH, astro_body_t_BODY_JUPITER, astro_body_t_BODY_MARS,
+    astro_body_t_BODY_MERCURY, astro_body_t_BODY_MOON, astro_body_t_BODY_NEPTUNE,
+    astro_body_t_BODY_SATURN, astro_body_t_BODY_SUN, astro_body_t_BODY_URANUS,
+    astro_body_t_BODY_VENUS, astro_direction_t_DIRECTION_RISE, astro_direction_t_DIRECTION_SET,
     astro_equator_date_t_EQUATOR_OF_DATE, astro_observer_t, astro_refraction_t_REFRACTION_NORMAL,
     astro_status_t_ASTRO_SUCCESS, astro_time_t,
 };
@@ -161,6 +161,102 @@ pub fn compute_planets(
             })
         })
         .collect()
+}
+
+pub struct RenderedJupiterMoon {
+    pub symbol: &'static str,
+    pub alt: f64,
+    pub az: f64,
+}
+
+/// Compute the sky positions of Jupiter's four Galilean moons (Io, Europa, Ganymede, Callisto).
+/// Returns an empty Vec if Jupiter is below the horizon or its position cannot be determined.
+pub fn compute_jupiter_moons(
+    lat: f64,
+    lon: f64,
+    height: f64,
+    datetime: DateTime<Utc>,
+) -> Vec<RenderedJupiterMoon> {
+    const MOONS: &[(&str, &str)] = &[
+        ("Io",       "Io"),
+        ("Europa",   "Eu"),
+        ("Ganymede", "Ga"),
+        ("Callisto", "Ca"),
+    ];
+
+    let observer = astro_observer_t { latitude: lat, longitude: lon, height };
+    let mut time = astro_time_from_datetime(datetime);
+
+    unsafe {
+        // Jupiter equator-of-date RA/Dec/dist
+        let jup_eq = Astronomy_Equator(
+            astro_body_t_BODY_JUPITER,
+            &mut time as *mut _,
+            observer,
+            astro_equator_date_t_EQUATOR_OF_DATE,
+            astro_aberration_t_ABERRATION,
+        );
+        if jup_eq.status != astro_status_t_ASTRO_SUCCESS {
+            return Vec::new();
+        }
+
+        // Jupiter geocentric EQJ vector (for projecting jovicentric offsets)
+        let jup_geo = Astronomy_GeoVector(
+            astro_body_t_BODY_JUPITER,
+            time,
+            astro_aberration_t_ABERRATION,
+        );
+        if jup_geo.status != astro_status_t_ASTRO_SUCCESS {
+            return Vec::new();
+        }
+        let d = (jup_geo.x * jup_geo.x + jup_geo.y * jup_geo.y + jup_geo.z * jup_geo.z).sqrt();
+        if d < 1e-9 {
+            return Vec::new();
+        }
+
+        // East and north unit vectors in EQJ frame at Jupiter's J2000 RA
+        // Using jup_eq.ra (hours) converted to radians
+        let ra_rad = jup_eq.ra * std::f64::consts::PI / 12.0;
+        let dec_rad = jup_eq.dec.to_radians();
+        let east = (-ra_rad.sin(), ra_rad.cos(), 0.0_f64);
+        let north = (
+            -dec_rad.sin() * ra_rad.cos(),
+            -dec_rad.sin() * ra_rad.sin(),
+            dec_rad.cos(),
+        );
+
+        let jup_moons = Astronomy_JupiterMoons(time);
+
+        let jovicentric = [
+            jup_moons.io,
+            jup_moons.europa,
+            jup_moons.ganymede,
+            jup_moons.callisto,
+        ];
+
+        jovicentric.iter().zip(MOONS.iter()).filter_map(|(sv, &(_name, symbol))| {
+            if sv.status != astro_status_t_ASTRO_SUCCESS {
+                return None;
+            }
+            // Angular offsets from Jupiter in radians
+            let xi  = (sv.x * east.0  + sv.y * east.1)  / d;
+            let eta = (sv.x * north.0 + sv.y * north.1 + sv.z * north.2) / d;
+
+            // Moon's equator-of-date RA/Dec (offset from Jupiter)
+            let moon_ra  = jup_eq.ra  + xi.to_degrees()  / (15.0 * dec_rad.cos());
+            let moon_dec = jup_eq.dec + eta.to_degrees();
+
+            let hor = Astronomy_Horizon(
+                &mut time as *mut _,
+                observer,
+                moon_ra,
+                moon_dec,
+                astro_refraction_t_REFRACTION_NORMAL,
+            );
+
+            Some(RenderedJupiterMoon { symbol, alt: hor.altitude, az: hor.azimuth })
+        }).collect()
+    }
 }
 
 pub struct OrreryPlanet {

@@ -801,7 +801,7 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Tab::SolarSystem =>
             " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [S/W/P/A]tab [Q]quit",
         Tab::Almanac =>
-            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [b]bodies [S/W/P/A]tab [Q]quit",
+            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [b]bodies [t]times [S/W/P/A]tab [Q]quit",
     };
 
     let text = vec![Line::from(line1), Line::from(line2)];
@@ -1070,30 +1070,80 @@ fn render_almanac_legend(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(""),
-        Line::from(Span::styled(
-            " Body  Alt",
-            Style::default().add_modifier(Modifier::BOLD),
-        )),
     ];
 
-    for (i, track) in app.almanac.tracks.iter().enumerate() {
-        let visible = app.selected_bodies.get(i).copied().unwrap_or(true);
-        let alt = track.altitudes[app.almanac.current_step];
-        let (r, g, b) = track.color_rgb;
-        let label = if alt > 0.0 {
-            format!(" {} {} {:.1}°", track.symbol, track.name, alt)
-        } else {
-            format!(" {} {} below", track.symbol, track.name)
+    if app.almanac_show_times {
+        text.push(Line::from(Span::styled(
+            "  Rise  Trans  Set ",
+            Style::default().add_modifier(Modifier::BOLD),
+        )));
+
+        let fmt = |dt: Option<chrono::DateTime<chrono::Utc>>| -> String {
+            match dt {
+                None => "--:--".to_string(),
+                Some(utc) => {
+                    if let Some(tz) = app.timezone {
+                        utc.with_timezone(&tz).format("%H:%M").to_string()
+                    } else {
+                        utc.format("%H:%M").to_string()
+                    }
+                }
+            }
         };
-        let style = if visible {
-            Style::default().fg(Color::Rgb(r, g, b))
-        } else {
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
-        };
-        text.push(Line::from(Span::styled(label, style)));
+
+        for (i, track) in app.almanac.tracks.iter().enumerate() {
+            let visible = app.selected_bodies.get(i).copied().unwrap_or(true);
+            let (r, g, b) = track.color_rgb;
+
+            let all_down = track.altitudes.iter().all(|&a| a <= 0.0);
+            let all_up = track.altitudes.iter().all(|&a| a > 0.0);
+
+            let label = if all_down {
+                format!(" {} {} below horizon", track.symbol, track.name)
+            } else if all_up {
+                let max_alt = track.transit_alt.map(|a| format!(" ({:.0}°)", a)).unwrap_or_default();
+                format!(" {} {} always up{}", track.symbol, track.name, max_alt)
+            } else {
+                format!(
+                    " {} {} {} {}",
+                    track.symbol,
+                    fmt(track.rise),
+                    fmt(track.transit),
+                    fmt(track.set),
+                )
+            };
+            let style = if visible {
+                Style::default().fg(Color::Rgb(r, g, b))
+            } else {
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
+            };
+            text.push(Line::from(Span::styled(label, style)));
+        }
+    } else {
+        text.push(Line::from(Span::styled(
+            " Body  Alt",
+            Style::default().add_modifier(Modifier::BOLD),
+        )));
+
+        for (i, track) in app.almanac.tracks.iter().enumerate() {
+            let visible = app.selected_bodies.get(i).copied().unwrap_or(true);
+            let alt = track.altitudes[app.almanac.current_step];
+            let (r, g, b) = track.color_rgb;
+            let label = if alt > 0.0 {
+                format!(" {} {} {:.1}°", track.symbol, track.name, alt)
+            } else {
+                format!(" {} {} below", track.symbol, track.name)
+            };
+            let style = if visible {
+                Style::default().fg(Color::Rgb(r, g, b))
+            } else {
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
+            };
+            text.push(Line::from(Span::styled(label, style)));
+        }
     }
 
-    let para =
-        Paragraph::new(text).block(Block::default().borders(Borders::ALL).title(" Legend "));
+    let title = if app.almanac_show_times { " Times [t] " } else { " Legend [t] " };
+    let para = Paragraph::new(text).block(Block::default().borders(Borders::ALL).title(title));
     f.render_widget(para, area);
 }

@@ -1,11 +1,12 @@
 use astronomy_engine_bindings::{
     Astronomy_Ecliptic, Astronomy_Equator, Astronomy_HelioVector, Astronomy_Horizon,
-    Astronomy_Illumination, astro_aberration_t_ABERRATION, astro_body_t_BODY_EARTH,
-    astro_body_t_BODY_JUPITER, astro_body_t_BODY_MARS, astro_body_t_BODY_MERCURY,
-    astro_body_t_BODY_MOON, astro_body_t_BODY_NEPTUNE, astro_body_t_BODY_SATURN,
-    astro_body_t_BODY_SUN, astro_body_t_BODY_URANUS, astro_body_t_BODY_VENUS,
+    Astronomy_Illumination, Astronomy_SearchRiseSetEx, astro_aberration_t_ABERRATION,
+    astro_body_t_BODY_EARTH, astro_body_t_BODY_JUPITER, astro_body_t_BODY_MARS,
+    astro_body_t_BODY_MERCURY, astro_body_t_BODY_MOON, astro_body_t_BODY_NEPTUNE,
+    astro_body_t_BODY_SATURN, astro_body_t_BODY_SUN, astro_body_t_BODY_URANUS,
+    astro_body_t_BODY_VENUS, astro_direction_t_DIRECTION_RISE, astro_direction_t_DIRECTION_SET,
     astro_equator_date_t_EQUATOR_OF_DATE, astro_observer_t, astro_refraction_t_REFRACTION_NORMAL,
-    astro_status_t_ASTRO_SUCCESS,
+    astro_status_t_ASTRO_SUCCESS, astro_time_t,
 };
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use stellui::astro::{
@@ -236,8 +237,95 @@ pub struct AlmanacTrack {
     pub name: &'static str,
     pub symbol: &'static str,
     pub color_rgb: (u8, u8, u8),
-    /// altitude in degrees (-90..90) for each step; index 0 = UTC midnight
+    /// altitude in degrees (-90..90) for each step; index 0 = local midnight
     pub altitudes: [f64; ALMANAC_STEPS],
+    pub rise: Option<DateTime<Utc>>,
+    pub transit: Option<DateTime<Utc>>,
+    pub transit_alt: Option<f64>,
+    pub set: Option<DateTime<Utc>>,
+}
+
+fn astro_time_to_utc(t: astro_time_t) -> DateTime<Utc> {
+    // t.ut = days since J2000.0 (2000-01-01 12:00:00 UTC)
+    use chrono::TimeZone;
+    let j2000 = Utc.with_ymd_and_hms(2000, 1, 1, 12, 0, 0).unwrap();
+    let micros = (t.ut * 86_400.0 * 1_000_000.0) as i64;
+    j2000 + Duration::microseconds(micros)
+}
+
+#[allow(clippy::type_complexity)]
+fn compute_rise_set_transit(
+    body: i32,
+    observer: astro_observer_t,
+    day_start: DateTime<Utc>,
+    altitudes: &[f64; ALMANAC_STEPS],
+    height: f64,
+) -> (Option<DateTime<Utc>>, Option<DateTime<Utc>>, Option<DateTime<Utc>>, Option<f64>) {
+    let all_up = altitudes.iter().all(|&a| a > 0.0);
+    let all_down = altitudes.iter().all(|&a| a <= 0.0);
+
+    // Transit: peak of altitude array with parabolic interpolation
+    let peak_idx = altitudes
+        .iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+
+    let transit_alt = altitudes[peak_idx];
+
+    let offset = if peak_idx > 0 && peak_idx < ALMANAC_STEPS - 1 {
+        let y0 = altitudes[peak_idx - 1];
+        let y1 = altitudes[peak_idx];
+        let y2 = altitudes[peak_idx + 1];
+        let denom = 2.0 * (2.0 * y1 - y0 - y2);
+        if denom.abs() > 1e-9 { (y0 - y2) / denom } else { 0.0 }
+    } else {
+        0.0
+    };
+
+    let transit_mins = (peak_idx as f64 + offset) * 15.0;
+    let transit = Some(day_start + Duration::seconds((transit_mins * 60.0) as i64));
+
+    if all_up || all_down {
+        return (None, transit, None, Some(transit_alt));
+    }
+
+    let start_time = astro_time_from_datetime(day_start);
+
+    let rise = unsafe {
+        let result = Astronomy_SearchRiseSetEx(
+            body,
+            observer,
+            astro_direction_t_DIRECTION_RISE,
+            start_time,
+            1.0,
+            height,
+        );
+        if result.status == astro_status_t_ASTRO_SUCCESS {
+            Some(astro_time_to_utc(result.time))
+        } else {
+            None
+        }
+    };
+
+    let set = unsafe {
+        let result = Astronomy_SearchRiseSetEx(
+            body,
+            observer,
+            astro_direction_t_DIRECTION_SET,
+            start_time,
+            1.0,
+            height,
+        );
+        if result.status == astro_status_t_ASTRO_SUCCESS {
+            Some(astro_time_to_utc(result.time))
+        } else {
+            None
+        }
+    };
+
+    (rise, transit, set, Some(transit_alt))
 }
 
 pub struct AlmanacInfo {
@@ -305,7 +393,9 @@ pub fn compute_almanac(lat: f64, lon: f64, height: f64, datetime: DateTime<Utc>,
                 }
             };
         }
-        AlmanacTrack { name, symbol, color_rgb, altitudes }
+        let (rise, transit, set, transit_alt) =
+            compute_rise_set_transit(body, observer, day_start, &altitudes, height);
+        AlmanacTrack { name, symbol, color_rgb, altitudes, rise, transit, transit_alt, set }
     }).collect();
 
     AlmanacInfo { tracks, current_step }

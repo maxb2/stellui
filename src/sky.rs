@@ -1,10 +1,11 @@
 use astronomy_engine_bindings::{
-    Astronomy_Ecliptic, Astronomy_Equator, Astronomy_HelioVector, Astronomy_Horizon,
-    Astronomy_Illumination, Astronomy_SearchRiseSetEx, astro_aberration_t_ABERRATION,
-    astro_body_t_BODY_EARTH, astro_body_t_BODY_JUPITER, astro_body_t_BODY_MARS,
-    astro_body_t_BODY_MERCURY, astro_body_t_BODY_MOON, astro_body_t_BODY_NEPTUNE,
-    astro_body_t_BODY_SATURN, astro_body_t_BODY_SUN, astro_body_t_BODY_URANUS,
-    astro_body_t_BODY_VENUS, astro_direction_t_DIRECTION_RISE, astro_direction_t_DIRECTION_SET,
+    Astronomy_AngleBetween, Astronomy_Ecliptic, Astronomy_Equator, Astronomy_GeoVector,
+    Astronomy_HelioVector, Astronomy_Horizon, Astronomy_Illumination, Astronomy_SearchRiseSetEx,
+    astro_aberration_t_ABERRATION, astro_aberration_t_NO_ABERRATION, astro_body_t_BODY_EARTH,
+    astro_body_t_BODY_JUPITER, astro_body_t_BODY_MARS, astro_body_t_BODY_MERCURY,
+    astro_body_t_BODY_MOON, astro_body_t_BODY_NEPTUNE, astro_body_t_BODY_SATURN,
+    astro_body_t_BODY_SUN, astro_body_t_BODY_URANUS, astro_body_t_BODY_VENUS,
+    astro_direction_t_DIRECTION_RISE, astro_direction_t_DIRECTION_SET,
     astro_equator_date_t_EQUATOR_OF_DATE, astro_observer_t, astro_refraction_t_REFRACTION_NORMAL,
     astro_status_t_ASTRO_SUCCESS, astro_time_t,
 };
@@ -727,5 +728,134 @@ pub fn compute_sun_moon(lat: f64, lon: f64, height: f64, datetime: DateTime<Utc>
         sun_az: smp.sun_hor.azimuth,
         moon_alt: smp.moon_hor.altitude,
         moon_az: smp.moon_hor.azimuth,
+    }
+}
+
+pub struct ConjunctionEvent {
+    pub body_a: &'static str,
+    pub symbol_a: &'static str,
+    pub body_b: &'static str,
+    pub symbol_b: &'static str,
+    pub time_utc: DateTime<Utc>,
+    pub sep_deg: f64,
+    pub alt_a: f64,
+    pub alt_b: f64,
+}
+
+#[derive(Default)]
+pub struct ConjunctionsInfo {
+    pub events: Vec<ConjunctionEvent>,
+    pub scan_start: DateTime<Utc>,
+    pub scan_end: DateTime<Utc>,
+}
+
+pub fn compute_conjunctions(
+    lat: f64,
+    lon: f64,
+    height: f64,
+    datetime: DateTime<Utc>,
+) -> ConjunctionsInfo {
+    const THRESHOLD_DEG: f64 = 5.0;
+    const STEPS: usize = 336; // 14 days × 24 h
+
+    static BODIES: &[(&str, &str, i32)] = &[
+        ("Mercury", "☿",  astro_body_t_BODY_MERCURY),
+        ("Venus",   "♀",  astro_body_t_BODY_VENUS),
+        ("Mars",    "♂",  astro_body_t_BODY_MARS),
+        ("Jupiter", "♃",  astro_body_t_BODY_JUPITER),
+        ("Saturn",  "♄",  astro_body_t_BODY_SATURN),
+        ("Uranus",  "⛢", astro_body_t_BODY_URANUS),
+        ("Neptune", "♆",  astro_body_t_BODY_NEPTUNE),
+        ("Moon",    "☽",  astro_body_t_BODY_MOON),
+    ];
+
+    let observer = astro_observer_t { latitude: lat, longitude: lon, height };
+    let scan_start = datetime - Duration::days(7);
+
+    // Pre-compute geo vectors for all bodies × all steps
+    let mut geo: Vec<Vec<Option<astronomy_engine_bindings::astro_vector_t>>> =
+        vec![vec![None; STEPS]; BODIES.len()];
+    #[allow(clippy::needless_range_loop)]
+    for s in 0..STEPS {
+        let t = astro_time_from_datetime(scan_start + Duration::hours(s as i64));
+        for (bi, &(_, _, body)) in BODIES.iter().enumerate() {
+            unsafe {
+                let v = Astronomy_GeoVector(body, t, astro_aberration_t_NO_ABERRATION);
+                if v.status == astro_status_t_ASTRO_SUCCESS {
+                    geo[bi][s] = Some(v);
+                }
+            }
+        }
+    }
+
+    // Scan each pair for local-minimum separations below threshold
+    let mut events = Vec::new();
+    for i in 0..BODIES.len() {
+        for j in (i + 1)..BODIES.len() {
+            let seps: Vec<f64> = (0..STEPS).map(|s| {
+                match (geo[i][s], geo[j][s]) {
+                    (Some(va), Some(vb)) => unsafe {
+                        let r = Astronomy_AngleBetween(va, vb);
+                        if r.status == astro_status_t_ASTRO_SUCCESS { r.angle } else { 180.0 }
+                    },
+                    _ => 180.0,
+                }
+            }).collect();
+
+            for s in 1..(STEPS - 1) {
+                if seps[s] < seps[s - 1] && seps[s] < seps[s + 1] && seps[s] < THRESHOLD_DEG {
+                    // Parabolic sub-step refinement
+                    let y0 = seps[s - 1];
+                    let y1 = seps[s];
+                    let y2 = seps[s + 1];
+                    let denom = 2.0 * (2.0 * y1 - y0 - y2);
+                    let offset = if denom.abs() > 1e-9 { (y0 - y2) / denom } else { 0.0 };
+                    let refined_dt = scan_start
+                        + Duration::microseconds(((s as f64 + offset) * 3600.0 * 1e6) as i64);
+
+                    let t_nom = astro_time_from_datetime(scan_start + Duration::hours(s as i64));
+                    let alt_a = conjunction_body_alt(BODIES[i].2, t_nom, observer);
+                    let alt_b = conjunction_body_alt(BODIES[j].2, t_nom, observer);
+
+                    events.push(ConjunctionEvent {
+                        body_a: BODIES[i].0,
+                        symbol_a: BODIES[i].1,
+                        body_b: BODIES[j].0,
+                        symbol_b: BODIES[j].1,
+                        time_utc: refined_dt,
+                        sep_deg: seps[s],
+                        alt_a,
+                        alt_b,
+                    });
+                }
+            }
+        }
+    }
+
+    events.sort_by(|a, b| a.time_utc.cmp(&b.time_utc));
+    let scan_end = datetime + Duration::days(7);
+    ConjunctionsInfo { events, scan_start, scan_end }
+}
+
+fn conjunction_body_alt(body: i32, mut t: astro_time_t, observer: astro_observer_t) -> f64 {
+    unsafe {
+        let eq = Astronomy_Equator(
+            body,
+            &mut t as *mut _,
+            observer,
+            astro_equator_date_t_EQUATOR_OF_DATE,
+            astro_aberration_t_ABERRATION,
+        );
+        if eq.status != astro_status_t_ASTRO_SUCCESS {
+            return -90.0;
+        }
+        let hor = Astronomy_Horizon(
+            &mut t as *mut _,
+            observer,
+            eq.ra,
+            eq.dec,
+            astro_refraction_t_REFRACTION_NORMAL,
+        );
+        hor.altitude
     }
 }

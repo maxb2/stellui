@@ -129,7 +129,7 @@ fn run(
             app.recompute();
         } else if !app.time_paused {
             let speed = match app.tab {
-                Tab::Sky | Tab::Weather | Tab::Almanac | Tab::Targets => SKY_SPEED_PRESETS[app.sky_speed_index].0,
+                Tab::Sky | Tab::Weather | Tab::Almanac | Tab::Targets | Tab::Conjunctions => SKY_SPEED_PRESETS[app.sky_speed_index].0,
                 Tab::SolarSystem => ORRERY_SPEED_PRESETS[app.orrery_speed_index].0,
             };
             let sim_nanos = (speed as f64 * elapsed_wall.as_secs_f64() * 1_000_000_000.0) as i64;
@@ -172,6 +172,10 @@ fn run(
                     }
                     KeyCode::Char('b') | KeyCode::Char('B') => {
                         app.tab = Tab::Targets;
+                        app.recompute();
+                    }
+                    KeyCode::Char('c') | KeyCode::Char('C') => {
+                        app.tab = Tab::Conjunctions;
                         app.recompute();
                     }
                     KeyCode::Char('f') | KeyCode::Char('F') if matches!(app.tab, Tab::Sky) => {
@@ -237,11 +241,12 @@ fn run(
                         app.datetime = Utc::now();
                         app.last_tick = Instant::now();
                         app.best_targets_valid = false;
+                        app.conjunctions_valid = false;
                         app.recompute();
                     }
                     KeyCode::Char(',') => {
                         match app.tab {
-                            Tab::Sky | Tab::Weather | Tab::Almanac | Tab::Targets => {
+                            Tab::Sky | Tab::Weather | Tab::Almanac | Tab::Targets | Tab::Conjunctions => {
                                 if app.sky_speed_index > 0 { app.sky_speed_index -= 1; }
                             }
                             Tab::SolarSystem => {
@@ -253,7 +258,7 @@ fn run(
                     }
                     KeyCode::Char('.') => {
                         match app.tab {
-                            Tab::Sky | Tab::Weather | Tab::Almanac | Tab::Targets => {
+                            Tab::Sky | Tab::Weather | Tab::Almanac | Tab::Targets | Tab::Conjunctions => {
                                 if app.sky_speed_index + 1 < SKY_SPEED_PRESETS.len() { app.sky_speed_index += 1; }
                             }
                             Tab::SolarSystem => {
@@ -299,6 +304,8 @@ fn run(
                             app.fov_alt = (app.fov_alt + step).min(90.0);
                         } else if matches!(app.tab, Tab::Targets) {
                             app.best_targets_scroll = app.best_targets_scroll.saturating_sub(1);
+                        } else if matches!(app.tab, Tab::Conjunctions) {
+                            app.conjunctions_scroll = app.conjunctions_scroll.saturating_sub(1);
                         } else {
                             app.weather_scroll = app.weather_scroll.saturating_sub(1);
                         }
@@ -310,6 +317,9 @@ fn run(
                         } else if matches!(app.tab, Tab::Targets) {
                             let max = app.best_targets.targets.len().saturating_sub(1);
                             app.best_targets_scroll = app.best_targets_scroll.saturating_add(1).min(max);
+                        } else if matches!(app.tab, Tab::Conjunctions) {
+                            let max = app.conjunctions.events.len().saturating_sub(1);
+                            app.conjunctions_scroll = app.conjunctions_scroll.saturating_add(1).min(max);
                         } else {
                             let max = app
                                 .forecasts

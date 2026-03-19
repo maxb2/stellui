@@ -12,7 +12,7 @@ pub fn resolve_tz(lat: f64, lon: f64) -> Option<chrono_tz::Tz> {
     if name.is_empty() { None } else { name.parse().ok() }
 }
 
-use crate::sky::{self, AlmanacInfo, BestTargetsInfo, OrreryInfo, RenderedDso, RenderedPlanet, RenderedStar, SunMoonInfo};
+use crate::sky::{self, AlmanacInfo, BestTargetsInfo, ConjunctionsInfo, OrreryInfo, RenderedDso, RenderedPlanet, RenderedStar, SunMoonInfo};
 use crate::weather::HourlyForecast;
 
 /// Sky tab: seconds → days. Default index 6 = 1x real-time.
@@ -51,6 +51,7 @@ pub enum Tab {
     SolarSystem,
     Almanac,
     Targets,
+    Conjunctions,
 }
 
 pub enum InputMode {
@@ -127,6 +128,11 @@ pub struct App {
     pub best_targets: BestTargetsInfo,
     pub best_targets_scroll: usize,
     pub best_targets_valid: bool,
+
+    pub conjunctions: ConjunctionsInfo,
+    pub conjunctions_scroll: usize,
+    pub conjunctions_valid: bool,
+    pub conjunctions_ref_time: DateTime<Utc>,
 
     pub forecasts: Option<Vec<HourlyForecast>>,
     pub weather_loading: bool,
@@ -206,6 +212,10 @@ impl App {
             best_targets: BestTargetsInfo::default(),
             best_targets_scroll: 0,
             best_targets_valid: false,
+            conjunctions: ConjunctionsInfo::default(),
+            conjunctions_scroll: 0,
+            conjunctions_valid: false,
+            conjunctions_ref_time: Utc::now(),
             forecasts: None,
             weather_loading: false,
             weather_error: None,
@@ -238,10 +248,16 @@ impl App {
         self.timezone = timezone_override.or_else(|| resolve_tz(self.lat, self.lon));
         self.location_index = index;
         self.best_targets_valid = false;
+        self.conjunctions_valid = false;
         self.recompute();
     }
 
     pub fn recompute(&mut self) {
+        let drift = (self.datetime - self.conjunctions_ref_time).num_hours().abs();
+        if drift >= 6 {
+            self.conjunctions_valid = false;
+        }
+
         self.stars = sky::compute_stars(
             self.lat,
             self.lon,
@@ -263,6 +279,11 @@ impl App {
         if matches!(self.tab, Tab::Targets) && !self.best_targets_valid {
             self.best_targets = sky::compute_best_targets(self.lat, self.lon, self.height, self.datetime, self.timezone, self.max_mag);
             self.best_targets_valid = true;
+        }
+        if matches!(self.tab, Tab::Conjunctions) && !self.conjunctions_valid {
+            self.conjunctions = sky::compute_conjunctions(self.lat, self.lon, self.height, self.datetime);
+            self.conjunctions_valid = true;
+            self.conjunctions_ref_time = self.datetime;
         }
     }
 }

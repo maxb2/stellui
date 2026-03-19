@@ -100,6 +100,7 @@ pub fn render(f: &mut Frame, app: &App) {
         Tab::SolarSystem => render_solar_system(f, app, chunks[1]),
         Tab::Almanac => render_almanac(f, app, chunks[1]),
         Tab::Targets => render_best_targets(f, app, chunks[1]),
+        Tab::Conjunctions => render_conjunctions(f, app, chunks[1]),
     }
 
     render_status(f, app, chunks[2]);
@@ -123,8 +124,9 @@ fn render_tabs(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Tab::SolarSystem => 2,
         Tab::Almanac => 3,
         Tab::Targets => 4,
+        Tab::Conjunctions => 5,
     };
-    let tabs = Tabs::new(vec!["[S] Sky", "[W] Weather", "[P] Solar System", "[A] Almanac", "[B] Best Targets"])
+    let tabs = Tabs::new(vec!["[S] Sky", "[W] Weather", "[P] Solar System", "[A] Almanac", "[B] Best Targets", "[C] Conjunctions"])
         .select(selected)
         .block(Block::default().borders(Borders::ALL).title(" Stellui "))
         .highlight_style(
@@ -844,7 +846,7 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         " [PAUSED]".to_string()
     } else {
         let label = match app.tab {
-            Tab::Sky | Tab::Weather | Tab::Almanac | Tab::Targets => SKY_SPEED_PRESETS[app.sky_speed_index].1,
+            Tab::Sky | Tab::Weather | Tab::Almanac | Tab::Targets | Tab::Conjunctions => SKY_SPEED_PRESETS[app.sky_speed_index].1,
             Tab::SolarSystem => ORRERY_SPEED_PRESETS[app.orrery_speed_index].1,
         };
         format!(" [{}]", label)
@@ -884,7 +886,9 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Tab::Almanac =>
             " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [v]bodies [t]times [S/W/P/A/B]tab [Q]quit",
         Tab::Targets =>
-            " [↑/↓]scroll  [+/-]mag  [S/W/P/A/B]tab  [Q]quit",
+            " [↑/↓]scroll  [+/-]mag  [S/W/P/A/B/C]tab  [Q]quit",
+        Tab::Conjunctions =>
+            " [↑/↓]scroll  [C]conjunctions  [S/W/P/A/B]tab  [N]now  [Q]quit",
     };
 
     let text = vec![Line::from(line1), Line::from(line2)];
@@ -1546,5 +1550,101 @@ fn render_best_targets(f: &mut Frame, app: &App, area: Rect) {
         .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
     let mut state = TableState::default().with_selected(Some(app.best_targets_scroll));
+    f.render_stateful_widget(table, rows_area[1], &mut state);
+}
+
+fn render_conjunctions(f: &mut Frame, app: &App, area: Rect) {
+    let rows_area = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Min(0),
+    ]).split(area);
+
+    let cj = &app.conjunctions;
+
+    let fmt_dt = |dt: chrono::DateTime<chrono::Utc>| -> String {
+        if let Some(tz) = app.timezone {
+            dt.with_timezone(&tz).format("%b %d %H:%M %Z").to_string()
+        } else {
+            dt.format("%b %d %H:%M UTC").to_string()
+        }
+    };
+
+    let header_text = format!(
+        " Conjunctions ±7 days (sep < 5°) — {} to {}",
+        fmt_dt(cj.scan_start),
+        fmt_dt(cj.scan_end)
+    );
+    let header_para = Paragraph::new(Line::from(Span::styled(
+        header_text,
+        Style::default().fg(Color::DarkGray),
+    )));
+    f.render_widget(header_para, rows_area[0]);
+
+    if cj.events.is_empty() {
+        let para = Paragraph::new("No conjunctions within 5° in the ±7 day window.")
+            .block(Block::default().borders(Borders::ALL).title(" Conjunctions "));
+        f.render_widget(para, rows_area[1]);
+        return;
+    }
+
+    // Find the event nearest to app.datetime for highlighting
+    let nearest_idx = cj.events.iter().enumerate().min_by_key(|(_, ev)| {
+        (ev.time_utc - app.datetime).num_seconds().abs()
+    }).map(|(i, _)| i).unwrap_or(0);
+
+    let header_row = Row::new(vec!["Time", "Bodies", "Sep°", "Visibility"])
+        .style(Style::default().add_modifier(Modifier::BOLD));
+
+    let rows: Vec<Row> = cj.events.iter().enumerate().map(|(i, ev)| {
+        let time_str = fmt_dt(ev.time_utc);
+
+        let bodies_str = format!("{} {} – {} {}", ev.symbol_a, ev.body_a, ev.symbol_b, ev.body_b);
+
+        let sep_str = format!("{:.2}°", ev.sep_deg);
+        let sep_color = if ev.sep_deg < 1.0 {
+            Color::Green
+        } else if ev.sep_deg < 3.0 {
+            Color::Yellow
+        } else {
+            Color::Reset
+        };
+
+        let (vis_str, vis_color) = if ev.alt_a >= 0.0 && ev.alt_b >= 0.0 {
+            (format!("Both visible {:.0}°/{:.0}°", ev.alt_a, ev.alt_b), Color::Green)
+        } else if ev.alt_a >= 0.0 {
+            (format!("{} above {:.0}°", ev.body_a, ev.alt_a), Color::Yellow)
+        } else if ev.alt_b >= 0.0 {
+            (format!("{} above {:.0}°", ev.body_b, ev.alt_b), Color::Yellow)
+        } else {
+            ("Below horizon".to_string(), Color::DarkGray)
+        };
+
+        let row_style = if i == nearest_idx {
+            Style::default().add_modifier(Modifier::REVERSED)
+        } else {
+            Style::default()
+        };
+
+        Row::new(vec![
+            ratatui::text::Text::from(Span::styled(time_str, Style::default().fg(Color::Reset))),
+            ratatui::text::Text::from(Span::styled(bodies_str, Style::default().fg(Color::White))),
+            ratatui::text::Text::from(Span::styled(sep_str, Style::default().fg(sep_color))),
+            ratatui::text::Text::from(Span::styled(vis_str, Style::default().fg(vis_color))),
+        ]).style(row_style)
+    }).collect();
+
+    let widths = [
+        Constraint::Length(22),
+        Constraint::Min(28),
+        Constraint::Length(7),
+        Constraint::Min(24),
+    ];
+
+    let table = Table::new(rows, widths)
+        .header(header_row)
+        .block(Block::default().borders(Borders::ALL).title(" Conjunctions "))
+        .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+
+    let mut state = TableState::default().with_selected(Some(app.conjunctions_scroll));
     f.render_stateful_widget(table, rows_area[1], &mut state);
 }

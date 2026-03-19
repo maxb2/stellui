@@ -14,6 +14,7 @@ use stellui::astro::{
     hor_to_stereo, star_stereo,
 };
 use stellui::catalog;
+use stellui::dso::{self, DsoKind};
 
 pub struct RenderedStar {
     pub x: f64,
@@ -399,6 +400,59 @@ pub fn compute_almanac(lat: f64, lon: f64, height: f64, datetime: DateTime<Utc>,
     }).collect();
 
     AlmanacInfo { tracks, current_step }
+}
+
+#[allow(dead_code)]
+pub struct RenderedDso {
+    pub catalog: &'static str,
+    pub name: &'static str,
+    pub kind: DsoKind,
+    pub x: f64,
+    pub y: f64,
+    pub alt: f64,
+    pub az: f64,
+    pub mag: f64,
+}
+
+pub fn compute_dsos(
+    lat: f64,
+    lon: f64,
+    height: f64,
+    datetime: DateTime<Utc>,
+) -> Vec<RenderedDso> {
+    let observer = astro_observer_t {
+        latitude: lat,
+        longitude: lon,
+        height,
+    };
+    let mut time = astro_time_from_datetime(datetime);
+    let southern = lat < 0.0;
+
+    dso::MESSIER
+        .iter()
+        .filter_map(|d| {
+            // Reuse star_stereo by constructing a temporary Star with the DSO's RA/Dec
+            let fake_star = catalog::Star { id: 0, ra: d.ra, dec: d.dec, mag: d.mag };
+            let polar = star_stereo(&fake_star, &mut time, &observer, true, true).ok()?;
+            if polar.rad > 2.0 {
+                return None; // below horizon
+            }
+            let alt = 90.0 - 2.0 * (polar.rad / 2.0).atan().to_degrees();
+            let az = polar.phi;
+            let oriented = polar.canvas_orient_for(southern);
+            let cart = CartesianCoordinates::from(oriented);
+            Some(RenderedDso {
+                catalog: d.catalog,
+                name: d.name,
+                kind: d.kind,
+                x: cart.x,
+                y: cart.y,
+                alt,
+                az,
+                mag: d.mag,
+            })
+        })
+        .collect()
 }
 
 pub fn compute_sun_moon(lat: f64, lon: f64, height: f64, datetime: DateTime<Utc>) -> SunMoonInfo {

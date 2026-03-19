@@ -24,3 +24,4 @@
 
 pub mod astro;
 pub mod catalog;
+pub mod dso;

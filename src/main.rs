@@ -191,6 +191,9 @@ fn run(
                     KeyCode::Char(']') if app.fov_active && matches!(app.tab, Tab::Sky) => {
                         app.fov_deg = (app.fov_deg / 1.5).max(1.0);
                     }
+                    KeyCode::Char('o') | KeyCode::Char('O') if matches!(app.tab, Tab::Sky) => {
+                        app.show_dsos = !app.show_dsos;
+                    }
                     KeyCode::Char('l') | KeyCode::Char('L') => {
                         app.input_mode = InputMode::LocationPicker;
                         app.picker_sel = app.location_index;

@@ -12,6 +12,7 @@ use ratatui::{
 use crate::app::{App, FovDraft, InputMode, NewLocationDraft, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab};
 use crate::sky::{self, ALMANAC_STEPS};
 use stellui::astro::CartesianCoordinates;
+use stellui::dso::DsoKind;
 
 /// Tangent-plane (gnomonic) projection.
 /// xi > 0 = east; eta > 0 = up. Returns None if behind the projection plane.
@@ -54,6 +55,17 @@ fn planet_color(name: &str) -> Color {
         "Uranus" => Color::Cyan,
         "Neptune" => Color::Blue,
         _ => Color::White,
+    }
+}
+
+fn dso_color(kind: DsoKind) -> Color {
+    match kind {
+        DsoKind::Galaxy          => Color::Cyan,
+        DsoKind::OpenCluster     => Color::White,
+        DsoKind::GlobularCluster => Color::Yellow,
+        DsoKind::Nebula          => Color::Magenta,
+        DsoKind::PlanetaryNebula => Color::Cyan,
+        DsoKind::SupernovaRemnant | DsoKind::Other => Color::Gray,
     }
 }
 
@@ -160,6 +172,15 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .map(|p| (p.name, p.symbol, p.x, p.y, planet_color(p.name)))
         .collect();
 
+    let dso_positions: Vec<(&str, &str, f64, f64, ratatui::style::Color)> = if app.show_dsos {
+        app.dsos
+            .iter()
+            .map(|d| (d.catalog, d.kind.symbol(), d.x, d.y, dso_color(d.kind)))
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     let sun_pos = app.sun_moon.sun_stereo.as_ref().map(|p| {
         let c = CartesianCoordinates::from(p);
         (c.x, c.y)
@@ -245,6 +266,14 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                     Line::from(Span::styled(*symbol, Style::default().fg(*color))),
                 );
             }
+
+            for (_catalog, symbol, x, y, color) in &dso_positions {
+                ctx.print(
+                    *x,
+                    *y,
+                    Line::from(Span::styled(*symbol, Style::default().fg(*color))),
+                );
+            }
         });
 
     f.render_widget(canvas, area);
@@ -277,6 +306,19 @@ fn render_fov_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             Some((p.name, p.symbol, cx, cy, planet_color(p.name)))
         })
         .collect();
+
+    // Project DSOs
+    let dso_fov_positions: Vec<(&str, &str, f64, f64, ratatui::style::Color)> = if app.show_dsos {
+        app.dsos
+            .iter()
+            .filter_map(|d| {
+                let (cx, cy) = project_and_scale(d.alt, d.az, calt, caz, scale)?;
+                Some((d.catalog, d.kind.symbol(), cx, cy, dso_color(d.kind)))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     // Project sun and moon
     let sun_fov_pos = if app.sun_moon.sun_alt >= 0.0 {
@@ -359,6 +401,10 @@ fn render_fov_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 )));
             }
 
+            for (_catalog, symbol, x, y, color) in &dso_fov_positions {
+                ctx.print(*x, *y, Line::from(Span::styled(*symbol, Style::default().fg(*color))));
+            }
+
             // Horizon line
             if horizon_visible {
                 ctx.draw(&CanvasLine {
@@ -439,6 +485,10 @@ fn render_info_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Line::from(""),
         Line::from(format!(" Stars: {}", app.stars.len())),
         Line::from(format!(" Max mag: {:.1}", app.max_mag)),
+        Line::from(format!(
+            " DSOs: {} [o]",
+            if app.show_dsos { format!("{}", app.dsos.len()) } else { "off".to_string() }
+        )),
         Line::from(""),
         Line::from(Span::styled(" Sun", Style::default().fg(Color::Yellow))),
         Line::from(format!("  {sun_status}")),
@@ -461,6 +511,31 @@ fn render_info_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 format!("  {} {} ({:.1})", p.symbol, p.name, p.mag),
                 Style::default().fg(planet_color(p.name)),
             )));
+        }
+    }
+
+    if app.show_dsos {
+        text.push(Line::from(""));
+        text.push(Line::from(Span::styled(
+            " DSO symbols",
+            Style::default().add_modifier(Modifier::BOLD),
+        )));
+        const DSO_LEGEND: &[(DsoKind, &str)] = &[
+            (DsoKind::Galaxy,          "Galaxy"),
+            (DsoKind::GlobularCluster, "Globular"),
+            (DsoKind::OpenCluster,     "Open cluster"),
+            (DsoKind::Nebula,          "Nebula"),
+            (DsoKind::PlanetaryNebula, "Planetary neb."),
+            (DsoKind::SupernovaRemnant,"SNR / other"),
+        ];
+        for &(kind, label) in DSO_LEGEND {
+            text.push(Line::from(vec![
+                Span::styled(
+                    format!("  {} ", kind.symbol()),
+                    Style::default().fg(dso_color(kind)),
+                ),
+                Span::raw(label),
+            ]));
         }
     }
 

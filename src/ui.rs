@@ -497,13 +497,14 @@ fn render_weather(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     .split(area);
 
     let left_chunks = Layout::vertical([
-        Constraint::Length(6),
-        Constraint::Length(6),
-        Constraint::Length(6),
-        Constraint::Length(6),
-        Constraint::Length(6),
-        Constraint::Length(6),
-        Constraint::Min(0),
+        Constraint::Length(6),  // cloud cover
+        Constraint::Length(6),  // humidity
+        Constraint::Length(6),  // precip
+        Constraint::Length(6),  // temp
+        Constraint::Length(6),  // visibility
+        Constraint::Length(6),  // wind
+        Constraint::Length(1),  // day/night axis
+        Constraint::Min(0),     // overflow
     ])
     .split(cols[0]);
 
@@ -578,6 +579,23 @@ fn render_weather(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     f.render_widget(temp_sparkline,     left_chunks[3]);
     f.render_widget(vis_sparkline,      left_chunks[4]);
     f.render_widget(wind_sparkline,     left_chunks[5]);
+
+    // Day/night axis aligned with sparkline inner content
+    let inner_width = left_chunks[0].width.saturating_sub(2) as usize;
+    use ratatui::text::{Line, Span};
+    let mut axis_spans: Vec<Span> = vec![Span::raw(" ")]; // left-border offset
+    axis_spans.extend(forecasts.iter().take(inner_width).map(|f| {
+        use crate::weather::DayPeriod;
+        let color = match f.day_period {
+            DayPeriod::Day                  => Color::Yellow,
+            DayPeriod::CivilTwilight        => Color::Rgb(255, 165, 0),
+            DayPeriod::NauticalTwilight     => Color::Rgb(100, 140, 210),
+            DayPeriod::AstronomicalTwilight => Color::Blue,
+            DayPeriod::Night                => Color::Rgb(80, 80, 160),
+        };
+        Span::styled(f.day_period.symbol(), Style::default().fg(color))
+    }));
+    f.render_widget(Paragraph::new(Line::from(axis_spans)), left_chunks[6]);
 
     // Table (right panel)
     use ratatui::widgets::Cell;

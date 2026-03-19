@@ -61,6 +61,7 @@ pub enum InputMode {
     AlmanacBodyPicker,
     FovInput,
     ObjectSearch,
+    EyepieceCalc,
 }
 
 pub struct NewLocationDraft {
@@ -71,6 +72,18 @@ pub struct NewLocationDraft {
 
 pub struct FovDraft {
     pub bufs: [String; 3], // [alt_deg, az_deg, fov_deg]
+    pub field: usize,
+    pub error: Option<String>,
+}
+
+/// State for the add-scope / add-eyepiece sub-form inside the eyepiece calculator.
+pub struct CalcDraft {
+    /// `false` = adding a scope, `true` = adding an eyepiece.
+    pub adding_eyepiece: bool,
+    /// Field buffers: [name, value1, value2]
+    ///   scope:    [name, aperture_mm, focal_length_mm]
+    ///   eyepiece: [name, focal_length_mm, afov_deg]
+    pub bufs: [String; 3],
     pub field: usize,
     pub error: Option<String>,
 }
@@ -123,10 +136,24 @@ pub struct App {
 
     pub search_query: String,
     pub search_sel: usize,
+
+    pub scopes: Vec<crate::config::Scope>,
+    pub scope_sel: usize,
+    pub eyepieces: Vec<crate::config::Eyepiece>,
+    pub ep_sel: usize,
+    /// Which row is focused in the calc view: 0 = scope, 1 = eyepiece.
+    pub calc_row: usize,
+    pub calc_draft: Option<CalcDraft>,
 }
 
 impl App {
-    pub fn new(locations: Vec<crate::config::Location>, initial_index: usize, max_mag_override: Option<f64>) -> Self {
+    pub fn new(
+        locations: Vec<crate::config::Location>,
+        scopes: Vec<crate::config::Scope>,
+        eyepieces: Vec<crate::config::Eyepiece>,
+        initial_index: usize,
+        max_mag_override: Option<f64>,
+    ) -> Self {
         let loc = &locations[initial_index];
         let timezone_override = loc.timezone.as_deref().and_then(|s| s.parse().ok());
         let lat = loc.lat;
@@ -182,6 +209,12 @@ impl App {
             fov_draft: None,
             search_query: String::new(),
             search_sel: 0,
+            scopes,
+            scope_sel: 0,
+            eyepieces,
+            ep_sel: 0,
+            calc_row: 0,
+            calc_draft: None,
         };
         app.recompute();
         app

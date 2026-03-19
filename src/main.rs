@@ -17,21 +17,21 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use app::{App, FovDraft, InputMode, NewLocationDraft, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab, search_hits};
+use app::{App, CalcDraft, FovDraft, InputMode, NewLocationDraft, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab, search_hits};
 use config::Location;
 use weather::HourlyForecast;
 
 fn main() -> Result<()> {
     let cfg = config::Config::load();
     let args: Vec<String> = std::env::args().collect();
-    let (locations, max_mag) = parse_args(&args, &cfg);
+    let (locations, scopes, eyepieces, max_mag) = parse_args(&args, &cfg);
 
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run(&mut terminal, locations, max_mag);
+    let result = run(&mut terminal, locations, scopes, eyepieces, max_mag);
 
     disable_raw_mode()?;
     stdout().execute(LeaveAlternateScreen)?;
@@ -39,8 +39,10 @@ fn main() -> Result<()> {
     result
 }
 
-fn parse_args(args: &[String], cfg: &config::Config) -> (Vec<Location>, Option<f64>) {
+fn parse_args(args: &[String], cfg: &config::Config) -> (Vec<Location>, Vec<config::Scope>, Vec<config::Eyepiece>, Option<f64>) {
     let mut locations = cfg.effective_locations();
+    let scopes = cfg.effective_scopes();
+    let eyepieces = cfg.effective_eyepieces();
     let max_mag = cfg.max_mag;
 
     // CLI --lat/--lon/--height override the first location
@@ -78,7 +80,7 @@ fn parse_args(args: &[String], cfg: &config::Config) -> (Vec<Location>, Option<f
         };
     }
 
-    (locations, max_mag)
+    (locations, scopes, eyepieces, max_mag)
 }
 
 fn spawn_weather(tx: &mpsc::Sender<Result<Vec<HourlyForecast>>>, lat: f64, lon: f64) {
@@ -91,9 +93,11 @@ fn spawn_weather(tx: &mpsc::Sender<Result<Vec<HourlyForecast>>>, lat: f64, lon: 
 fn run(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     locations: Vec<Location>,
+    scopes: Vec<config::Scope>,
+    eyepieces: Vec<config::Eyepiece>,
     max_mag_override: Option<f64>,
 ) -> Result<()> {
-    let mut app = App::new(locations, 0, max_mag_override);
+    let mut app = App::new(locations, scopes, eyepieces, 0, max_mag_override);
     let (tx, rx) = mpsc::channel::<Result<Vec<HourlyForecast>>>();
 
     // Fetch weather on startup
@@ -277,6 +281,11 @@ fn run(
                         app.search_query = String::new();
                         app.search_sel = 0;
                     }
+                    KeyCode::Char('e') | KeyCode::Char('E') => {
+                        app.input_mode = InputMode::EyepieceCalc;
+                        app.calc_draft = None;
+                        app.calc_row = 0;
+                    }
                     KeyCode::Up => {
                         if app.fov_active && matches!(app.tab, Tab::Sky) {
                             let step = (app.fov_deg / 6.0).max(0.5);
@@ -352,7 +361,7 @@ fn run(
                             } else if app.location_index > app.picker_sel {
                                 app.location_index -= 1;
                             }
-                            config::Config::save(&app.locations, Some(app.max_mag));
+                            config::Config::save(&app.locations, &app.scopes, &app.eyepieces, Some(app.max_mag));
                         }
                     }
                     _ => {}
@@ -416,7 +425,7 @@ fn run(
                                     app.locations.push(new_loc);
                                     let new_index = app.locations.len() - 1;
                                     app.picker_sel = new_index;
-                                    config::Config::save(&app.locations, Some(app.max_mag));
+                                    config::Config::save(&app.locations, &app.scopes, &app.eyepieces, Some(app.max_mag));
                                     app.new_loc_draft = None;
                                     app.input_mode = InputMode::LocationPicker;
                                 }
@@ -536,6 +545,125 @@ fn run(
                         _ => {}
                     }
                 }
+                InputMode::EyepieceCalc => {
+                    if app.calc_draft.is_some() {
+                        // ── Add-scope / add-eyepiece sub-form ──
+                        let draft = app.calc_draft.as_mut().unwrap();
+                        match key.code {
+                            KeyCode::Esc => { app.calc_draft = None; }
+                            KeyCode::Tab | KeyCode::Down => {
+                                if draft.field < 2 { draft.field += 1; }
+                            }
+                            KeyCode::Up => {
+                                if draft.field > 0 { draft.field -= 1; }
+                            }
+                            KeyCode::Backspace => { draft.bufs[draft.field].pop(); }
+                            KeyCode::Char(c) => { draft.bufs[draft.field].push(c); }
+                            KeyCode::Enter => {
+                                let draft = app.calc_draft.as_mut().unwrap();
+                                if draft.field < 2 {
+                                    draft.field += 1;
+                                } else {
+                                    let name = draft.bufs[0].trim().to_string();
+                                    let v1 = draft.bufs[1].trim().parse::<f64>().ok()
+                                        .filter(|v| *v > 0.0);
+                                    let v2 = draft.bufs[2].trim().parse::<f64>().ok()
+                                        .filter(|v| *v > 0.0);
+                                    if name.is_empty() {
+                                        draft.error = Some("Name cannot be empty".to_string());
+                                    } else if v1.is_none() || v2.is_none() {
+                                        draft.error = Some("Values must be positive numbers".to_string());
+                                    } else {
+                                        let adding_ep = draft.adding_eyepiece;
+                                        if adding_ep {
+                                            let afov = v2.unwrap().min(120.0);
+                                            app.eyepieces.push(config::Eyepiece {
+                                                name,
+                                                focal_length_mm: v1.unwrap(),
+                                                afov_deg: afov,
+                                            });
+                                            app.ep_sel = app.eyepieces.len() - 1;
+                                        } else {
+                                            app.scopes.push(config::Scope {
+                                                name,
+                                                aperture_mm: v1.unwrap(),
+                                                focal_length_mm: v2.unwrap(),
+                                            });
+                                            app.scope_sel = app.scopes.len() - 1;
+                                        }
+                                        config::Config::save(&app.locations, &app.scopes, &app.eyepieces, Some(app.max_mag));
+                                        app.calc_draft = None;
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        // ── Main calc view ──
+                        match key.code {
+                            KeyCode::Esc => { app.input_mode = InputMode::Normal; }
+                            KeyCode::Tab | KeyCode::Down => {
+                                app.calc_row = if app.calc_row == 0 { 1 } else { 0 };
+                            }
+                            KeyCode::Up => {
+                                app.calc_row = if app.calc_row == 0 { 1 } else { 0 };
+                            }
+                            KeyCode::Left => {
+                                if app.calc_row == 0 && !app.scopes.is_empty() {
+                                    if app.scope_sel > 0 { app.scope_sel -= 1; }
+                                    else { app.scope_sel = app.scopes.len() - 1; }
+                                } else if app.calc_row == 1 && !app.eyepieces.is_empty() {
+                                    if app.ep_sel > 0 { app.ep_sel -= 1; }
+                                    else { app.ep_sel = app.eyepieces.len() - 1; }
+                                }
+                            }
+                            KeyCode::Right => {
+                                if app.calc_row == 0 && !app.scopes.is_empty() {
+                                    app.scope_sel = (app.scope_sel + 1) % app.scopes.len();
+                                } else if app.calc_row == 1 && !app.eyepieces.is_empty() {
+                                    app.ep_sel = (app.ep_sel + 1) % app.eyepieces.len();
+                                }
+                            }
+                            KeyCode::Enter => {
+                                // Apply true FOV to FoV mode
+                                if let (Some(scope), Some(ep)) =
+                                    (app.scopes.get(app.scope_sel), app.eyepieces.get(app.ep_sel))
+                                {
+                                    let mag = scope.focal_length_mm / ep.focal_length_mm;
+                                    let true_fov = (ep.afov_deg / mag).clamp(0.01, 90.0);
+                                    app.fov_deg = true_fov;
+                                    app.fov_active = true;
+                                    app.tab = Tab::Sky;
+                                }
+                                app.input_mode = InputMode::Normal;
+                            }
+                            KeyCode::Char('n') | KeyCode::Char('N') => {
+                                app.calc_draft = Some(CalcDraft {
+                                    adding_eyepiece: app.calc_row == 1,
+                                    bufs: [String::new(), String::new(), String::new()],
+                                    field: 0,
+                                    error: None,
+                                });
+                            }
+                            KeyCode::Char('d') | KeyCode::Char('D') => {
+                                if app.calc_row == 0 && app.scopes.len() > 1 {
+                                    app.scopes.remove(app.scope_sel);
+                                    if app.scope_sel >= app.scopes.len() {
+                                        app.scope_sel = app.scopes.len() - 1;
+                                    }
+                                    config::Config::save(&app.locations, &app.scopes, &app.eyepieces, Some(app.max_mag));
+                                } else if app.calc_row == 1 && app.eyepieces.len() > 1 {
+                                    app.eyepieces.remove(app.ep_sel);
+                                    if app.ep_sel >= app.eyepieces.len() {
+                                        app.ep_sel = app.eyepieces.len() - 1;
+                                    }
+                                    config::Config::save(&app.locations, &app.scopes, &app.eyepieces, Some(app.max_mag));
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 InputMode::EditingDatetime | InputMode::EditingTimezone => {
                     match key.code {
                         KeyCode::Esc => {
@@ -589,6 +717,6 @@ fn apply_input(app: &mut App) {
                 app.timezone = Some(tz);
             }
         }
-        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation | InputMode::AlmanacBodyPicker | InputMode::FovInput | InputMode::ObjectSearch => {}
+        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation | InputMode::AlmanacBodyPicker | InputMode::FovInput | InputMode::ObjectSearch | InputMode::EyepieceCalc => {}
     }
 }

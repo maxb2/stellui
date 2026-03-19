@@ -110,6 +110,7 @@ pub fn render(f: &mut Frame, app: &App) {
         InputMode::AlmanacBodyPicker => render_almanac_body_picker(f, app),
         InputMode::FovInput => render_fov_input(f, app),
         InputMode::ObjectSearch => render_object_search(f, app),
+        InputMode::EyepieceCalc => render_eyepiece_calc(f, app),
         _ => {}
     }
 }
@@ -857,7 +858,7 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let loc_name = app.locations.get(app.location_index).map(|l| l.name.as_str()).unwrap_or("");
 
     let editing_hint = match app.input_mode {
-        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation | InputMode::AlmanacBodyPicker | InputMode::FovInput | InputMode::ObjectSearch => String::new(),
+        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation | InputMode::AlmanacBodyPicker | InputMode::FovInput | InputMode::ObjectSearch | InputMode::EyepieceCalc => String::new(),
         InputMode::EditingDatetime => format!(" Editing time (local): {}_", app.input_buf),
         InputMode::EditingTimezone => format!(" Editing timezone: {}_", app.input_buf),
     };
@@ -1096,6 +1097,143 @@ fn render_object_search(f: &mut Frame, app: &App) {
     all_lines.push(hint);
 
     let para = Paragraph::new(all_lines);
+    f.render_widget(para, inner);
+}
+
+fn render_eyepiece_calc(f: &mut Frame, app: &App) {
+    let area = centered_popup(f, 65, 20);
+    f.render_widget(Clear, area);
+
+    let block = Block::default().borders(Borders::ALL).title(" Equipment Calculator [e] ");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    if let Some(draft) = &app.calc_draft {
+        // ── Add-scope / add-eyepiece sub-form ──
+        let (title, labels) = if draft.adding_eyepiece {
+            ("New Eyepiece", ["Name", "Focal length (mm)", "AFOV (°, e.g. 52)"])
+        } else {
+            ("New Scope", ["Name", "Aperture (mm)", "Focal length (mm)"])
+        };
+        lines.push(Line::from(Span::styled(
+            format!(" {title}"),
+            Style::default().add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(""));
+        for (i, label) in labels.iter().enumerate() {
+            let cursor = if i == draft.field { "_" } else { "" };
+            let text = format!("  {}: {}{}", label, draft.bufs[i], cursor);
+            if i == draft.field {
+                lines.push(Line::from(Span::styled(text, Style::default().fg(Color::Yellow))));
+            } else {
+                lines.push(Line::from(text));
+            }
+        }
+        if let Some(err) = &draft.error {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                format!(" {err}"),
+                Style::default().fg(Color::Red),
+            )));
+        }
+        while lines.len() + 1 < inner.height as usize {
+            lines.push(Line::from(""));
+        }
+        lines.push(Line::from(Span::styled(
+            " [Tab/↓] next  [↑] prev  [Enter] confirm  [Esc] back",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        // ── Main calc view ──
+        let scope = app.scopes.get(app.scope_sel);
+        let ep    = app.eyepieces.get(app.ep_sel);
+
+        // Scope row
+        let scope_label = scope.map(|s| s.name.as_str()).unwrap_or("—");
+        let scope_line = format!(
+            " Scope  [{}/{}]  {}",
+            app.scope_sel + 1, app.scopes.len(), scope_label
+        );
+        if app.calc_row == 0 {
+            lines.push(Line::from(Span::styled(
+                scope_line,
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            )));
+        } else {
+            lines.push(Line::from(scope_line));
+        }
+        if let Some(s) = scope {
+            let fr = s.focal_length_mm / s.aperture_mm;
+            lines.push(Line::from(Span::styled(
+                format!("   aperture {:.0}mm  fl {:.0}mm  f/{:.1}", s.aperture_mm, s.focal_length_mm, fr),
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else {
+            lines.push(Line::from(""));
+        }
+        lines.push(Line::from(""));
+
+        // Eyepiece row
+        let ep_label = ep.map(|e| e.name.as_str()).unwrap_or("—");
+        let ep_line = format!(
+            " Eyepiece  [{}/{}]  {}",
+            app.ep_sel + 1, app.eyepieces.len(), ep_label
+        );
+        if app.calc_row == 1 {
+            lines.push(Line::from(Span::styled(
+                ep_line,
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            )));
+        } else {
+            lines.push(Line::from(ep_line));
+        }
+        if let Some(e) = ep {
+            lines.push(Line::from(Span::styled(
+                format!("   fl {:.0}mm  AFOV {:.0}°", e.focal_length_mm, e.afov_deg),
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else {
+            lines.push(Line::from(""));
+        }
+        lines.push(Line::from(""));
+
+        // Computed results
+        lines.push(Line::from(Span::styled(
+            " ─── Results ───────────────────────────────",
+            Style::default().fg(Color::DarkGray),
+        )));
+        if let (Some(s), Some(e)) = (scope, ep) {
+            let mag      = s.focal_length_mm / e.focal_length_mm;
+            let true_fov = e.afov_deg / mag;
+            let exit_pup = s.aperture_mm / mag;
+            let lim_mag  = 2.1 + 5.0 * s.aperture_mm.log10();
+            lines.push(Line::from(format!("  Magnification  {:.0}×", mag)));
+            lines.push(Line::from(format!("  True FOV       {:.2}°", true_fov)));
+            lines.push(Line::from(format!("  Exit pupil     {:.1}mm", exit_pup)));
+            lines.push(Line::from(format!("  Limiting mag   ~{:.1}", lim_mag)));
+        } else {
+            lines.push(Line::from(Span::styled(
+                "  (select scope and eyepiece)",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        while lines.len() + 2 < inner.height as usize {
+            lines.push(Line::from(""));
+        }
+        lines.push(Line::from(Span::styled(
+            " [←→] cycle  [Tab] switch row  [Enter] apply FOV",
+            Style::default().fg(Color::DarkGray),
+        )));
+        lines.push(Line::from(Span::styled(
+            " [n] new  [d] delete  [Esc] close",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    let para = Paragraph::new(lines);
     f.render_widget(para, inner);
 }
 

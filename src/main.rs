@@ -17,7 +17,7 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use app::{App, FovDraft, InputMode, NewLocationDraft, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab};
+use app::{App, FovDraft, InputMode, NewLocationDraft, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab, search_hits};
 use config::Location;
 use weather::HourlyForecast;
 
@@ -272,6 +272,11 @@ fn run(
                             app.weather_loading = true;
                         }
                     }
+                    KeyCode::Char('/') => {
+                        app.input_mode = InputMode::ObjectSearch;
+                        app.search_query = String::new();
+                        app.search_sel = 0;
+                    }
                     KeyCode::Up => {
                         if app.fov_active && matches!(app.tab, Tab::Sky) {
                             let step = (app.fov_deg / 6.0).max(0.5);
@@ -488,6 +493,49 @@ fn run(
                         _ => {}
                     }
                 }
+                InputMode::ObjectSearch => {
+                    match key.code {
+                        KeyCode::Esc => {
+                            app.input_mode = InputMode::Normal;
+                        }
+                        KeyCode::Up => {
+                            let hits = search_hits(&app, &app.search_query.clone());
+                            let n = hits.len();
+                            if n > 0 {
+                                app.search_sel = if app.search_sel == 0 { n - 1 } else { app.search_sel - 1 };
+                            }
+                        }
+                        KeyCode::Down => {
+                            let hits = search_hits(&app, &app.search_query.clone());
+                            let n = hits.len();
+                            if n > 0 {
+                                app.search_sel = (app.search_sel + 1) % n;
+                            }
+                        }
+                        KeyCode::Enter => {
+                            let hits = search_hits(&app, &app.search_query.clone());
+                            if let Some((_sym, _label, alt, az)) = hits.get(app.search_sel)
+                                && *alt >= 0.0
+                            {
+                                app.fov_alt = *alt;
+                                app.fov_az = *az;
+                                app.fov_deg = 10.0;
+                                app.fov_active = true;
+                                app.tab = Tab::Sky;
+                            }
+                            app.input_mode = InputMode::Normal;
+                        }
+                        KeyCode::Backspace => {
+                            app.search_query.pop();
+                            app.search_sel = 0;
+                        }
+                        KeyCode::Char(c) => {
+                            app.search_query.push(c);
+                            app.search_sel = 0;
+                        }
+                        _ => {}
+                    }
+                }
                 InputMode::EditingDatetime | InputMode::EditingTimezone => {
                     match key.code {
                         KeyCode::Esc => {
@@ -541,6 +589,6 @@ fn apply_input(app: &mut App) {
                 app.timezone = Some(tz);
             }
         }
-        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation | InputMode::AlmanacBodyPicker | InputMode::FovInput => {}
+        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation | InputMode::AlmanacBodyPicker | InputMode::FovInput | InputMode::ObjectSearch => {}
     }
 }

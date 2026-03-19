@@ -60,6 +60,7 @@ pub enum InputMode {
     EditingTimezone,
     AlmanacBodyPicker,
     FovInput,
+    ObjectSearch,
 }
 
 pub struct NewLocationDraft {
@@ -119,6 +120,9 @@ pub struct App {
     pub fov_az: f64,
     pub fov_deg: f64,
     pub fov_draft: Option<FovDraft>,
+
+    pub search_query: String,
+    pub search_sel: usize,
 }
 
 impl App {
@@ -176,6 +180,8 @@ impl App {
             fov_az: 180.0,
             fov_deg: 30.0,
             fov_draft: None,
+            search_query: String::new(),
+            search_sel: 0,
         };
         app.recompute();
         app
@@ -213,6 +219,66 @@ impl App {
             }
         }
     }
+}
+
+/// Search result: (symbol, label, alt_deg, az_deg).
+pub type SearchHit = (&'static str, String, f64, f64);
+
+/// Collect objects matching `query` from DSOs, planets, Sun, and Moon.
+/// Returns results sorted: above-horizon first, then alphabetically.
+pub fn search_hits(app: &App, query: &str) -> Vec<SearchHit> {
+    let q = query.to_lowercase();
+    let mut hits: Vec<SearchHit> = Vec::new();
+
+    // DSOs
+    for dso in &app.dsos {
+        let matches = q.is_empty()
+            || dso.catalog.to_lowercase().contains(&q)
+            || dso.name.to_lowercase().contains(&q);
+        if matches {
+            let label = if dso.name.is_empty() {
+                dso.catalog.to_string()
+            } else {
+                format!("{}  {}", dso.catalog, dso.name)
+            };
+            use stellui::dso::DsoKind;
+            let symbol = match dso.kind {
+                DsoKind::Galaxy          => "⊙",
+                DsoKind::OpenCluster     => "○",
+                DsoKind::GlobularCluster => "⊕",
+                DsoKind::Nebula          => "☁",
+                DsoKind::PlanetaryNebula => "◎",
+                DsoKind::SupernovaRemnant | DsoKind::Other => "✦",
+            };
+            hits.push((symbol, label, dso.alt, dso.az));
+        }
+    }
+
+    // Planets
+    for planet in &app.planets {
+        if q.is_empty() || planet.name.to_lowercase().contains(&q) {
+            hits.push((planet.symbol, planet.name.to_string(), planet.alt, planet.az));
+        }
+    }
+
+    // Sun
+    if q.is_empty() || "sun".contains(&q) {
+        hits.push(("☀", "Sun".to_string(), app.sun_moon.sun_alt, app.sun_moon.sun_az));
+    }
+
+    // Moon
+    if q.is_empty() || "moon".contains(&q) {
+        hits.push(("☽", "Moon".to_string(), app.sun_moon.moon_alt, app.sun_moon.moon_az));
+    }
+
+    // Sort: above-horizon first, then alphabetically by label
+    hits.sort_by(|a, b| {
+        let a_up = a.2 >= 0.0;
+        let b_up = b.2 >= 0.0;
+        b_up.cmp(&a_up).then_with(|| a.1.cmp(&b.1))
+    });
+
+    hits
 }
 
 #[cfg(test)]

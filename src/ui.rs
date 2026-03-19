@@ -9,7 +9,7 @@ use ratatui::{
     },
 };
 
-use crate::app::{App, FovDraft, InputMode, NewLocationDraft, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab};
+use crate::app::{App, FovDraft, InputMode, NewLocationDraft, ORRERY_SPEED_PRESETS, SKY_SPEED_PRESETS, Tab, search_hits};
 use crate::sky::{self, ALMANAC_STEPS};
 use stellui::astro::CartesianCoordinates;
 use stellui::dso::DsoKind;
@@ -109,6 +109,7 @@ pub fn render(f: &mut Frame, app: &App) {
         InputMode::AddingLocation => render_add_location(f, app),
         InputMode::AlmanacBodyPicker => render_almanac_body_picker(f, app),
         InputMode::FovInput => render_fov_input(f, app),
+        InputMode::ObjectSearch => render_object_search(f, app),
         _ => {}
     }
 }
@@ -175,6 +176,7 @@ fn render_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let dso_positions: Vec<(&str, &str, f64, f64, ratatui::style::Color)> = if app.show_dsos {
         app.dsos
             .iter()
+            .filter(|d| d.alt >= 0.0)
             .map(|d| (d.catalog, d.kind.symbol(), d.x, d.y, dso_color(d.kind)))
             .collect()
     } else {
@@ -311,6 +313,7 @@ fn render_fov_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let dso_fov_positions: Vec<(&str, &str, f64, f64, ratatui::style::Color)> = if app.show_dsos {
         app.dsos
             .iter()
+            .filter(|d| d.alt >= 0.0)
             .filter_map(|d| {
                 let (cx, cy) = project_and_scale(d.alt, d.az, calt, caz, scale)?;
                 Some((d.catalog, d.kind.symbol(), cx, cy, dso_color(d.kind)))
@@ -854,7 +857,7 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let loc_name = app.locations.get(app.location_index).map(|l| l.name.as_str()).unwrap_or("");
 
     let editing_hint = match app.input_mode {
-        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation | InputMode::AlmanacBodyPicker | InputMode::FovInput => String::new(),
+        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation | InputMode::AlmanacBodyPicker | InputMode::FovInput | InputMode::ObjectSearch => String::new(),
         InputMode::EditingDatetime => format!(" Editing time (local): {}_", app.input_buf),
         InputMode::EditingTimezone => format!(" Editing timezone: {}_", app.input_buf),
     };
@@ -870,7 +873,7 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let line2 = match app.tab {
         Tab::Sky =>
-            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [+/-]mag [D]orion [f]toggle FoV [S/W/P/A]tab [Q]quit",
+            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [+/-]mag [D]orion [f]toggle FoV [/]search [S/W/P/A]tab [Q]quit",
         Tab::Weather =>
             " [L]locations [R]weather [↑/↓]scroll [S/W/P/A]tab [Q]quit",
         Tab::SolarSystem =>
@@ -1011,6 +1014,89 @@ fn render_almanac_canvas(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
         });
 
     f.render_widget(canvas, area);
+}
+
+fn render_object_search(f: &mut Frame, app: &App) {
+    let hits = search_hits(app, &app.search_query);
+    let n = hits.len();
+
+    let popup_lines: u16 = 14;
+    let area = centered_popup(f, 70, popup_lines);
+    f.render_widget(Clear, area);
+
+    let block = Block::default().borders(Borders::ALL).title(" Object Search ");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    // Query line
+    let query_line = Line::from(vec![
+        Span::styled("> ", Style::default().fg(Color::Yellow)),
+        Span::raw(app.search_query.as_str()),
+        Span::styled("_", Style::default().fg(Color::Yellow)),
+    ]);
+
+    // Results: up to (inner.height - 3) rows, scrolled around search_sel
+    let list_rows = inner.height.saturating_sub(3) as usize;
+    let sel = app.search_sel.min(if n == 0 { 0 } else { n - 1 });
+
+    let start = if n == 0 {
+        0
+    } else {
+        let half = list_rows / 2;
+        if sel < half { 0 } else { (sel - half).min(n.saturating_sub(list_rows)) }
+    };
+
+    let mut result_lines: Vec<Line> = Vec::new();
+    if n == 0 {
+        result_lines.push(Line::from(Span::styled(
+            "  no matches",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        for (i, (sym, label, alt, az)) in hits.iter().enumerate().skip(start).take(list_rows) {
+            let is_sel = i == sel;
+            if *alt >= 0.0 {
+                let text = format!(" {} {:<30} alt {:>5.1}°  az {:>5.1}°", sym, label, alt, az);
+                if is_sel {
+                    result_lines.push(Line::from(Span::styled(
+                        text,
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    )));
+                } else {
+                    result_lines.push(Line::from(text));
+                }
+            } else {
+                let text = format!(" {} {:<30} below horizon", sym, label);
+                if is_sel {
+                    result_lines.push(Line::from(Span::styled(
+                        text,
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    )));
+                } else {
+                    result_lines.push(Line::from(Span::styled(
+                        text,
+                        Style::default().fg(Color::DarkGray),
+                    )));
+                }
+            }
+        }
+    }
+
+    let hint = Line::from(Span::styled(
+        " [↑↓] select  [Enter] go to  [Esc] cancel",
+        Style::default().fg(Color::DarkGray),
+    ));
+
+    let mut all_lines = vec![query_line, Line::from("─".repeat(inner.width as usize))];
+    all_lines.extend(result_lines);
+    // Pad to push hint to bottom
+    while all_lines.len() + 1 < inner.height as usize {
+        all_lines.push(Line::from(""));
+    }
+    all_lines.push(hint);
+
+    let para = Paragraph::new(all_lines);
+    f.render_widget(para, inner);
 }
 
 fn centered_popup(f: &Frame, width_pct: u16, height: u16) -> Rect {

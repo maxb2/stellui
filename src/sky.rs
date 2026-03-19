@@ -434,9 +434,7 @@ pub fn compute_dsos(
             // Reuse star_stereo by constructing a temporary Star with the DSO's RA/Dec
             let fake_star = catalog::Star { id: 0, ra: d.ra, dec: d.dec, mag: d.mag };
             let polar = star_stereo(&fake_star, &mut time, &observer, true, true).ok()?;
-            if polar.rad > 2.0 {
-                return None; // below horizon
-            }
+            // Keep below-horizon DSOs (alt < 0) so search can find them; rendering filters by alt.
             let alt = 90.0 - 2.0 * (polar.rad / 2.0).atan().to_degrees();
             let az = polar.phi;
             let oriented = polar.canvas_orient_for(southern);

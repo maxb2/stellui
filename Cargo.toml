@@ -1,6 +1,6 @@
 [package]
 name = "stellui"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 description = "Terminal UI for stargazing — displays a live star chart with sun/moon positions and weather-based seeing quality forecasts"
 license = "MIT"

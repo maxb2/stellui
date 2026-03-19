@@ -99,6 +99,7 @@ pub fn render(f: &mut Frame, app: &App) {
         Tab::Weather => render_weather(f, app, chunks[1]),
         Tab::SolarSystem => render_solar_system(f, app, chunks[1]),
         Tab::Almanac => render_almanac(f, app, chunks[1]),
+        Tab::Targets => render_best_targets(f, app, chunks[1]),
     }
 
     render_status(f, app, chunks[2]);
@@ -121,8 +122,9 @@ fn render_tabs(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Tab::Weather => 1,
         Tab::SolarSystem => 2,
         Tab::Almanac => 3,
+        Tab::Targets => 4,
     };
-    let tabs = Tabs::new(vec!["[S] Sky", "[W] Weather", "[P] Solar System", "[A] Almanac"])
+    let tabs = Tabs::new(vec!["[S] Sky", "[W] Weather", "[P] Solar System", "[A] Almanac", "[B] Best Targets"])
         .select(selected)
         .block(Block::default().borders(Borders::ALL).title(" Stellui "))
         .highlight_style(
@@ -842,7 +844,7 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         " [PAUSED]".to_string()
     } else {
         let label = match app.tab {
-            Tab::Sky | Tab::Weather | Tab::Almanac => SKY_SPEED_PRESETS[app.sky_speed_index].1,
+            Tab::Sky | Tab::Weather | Tab::Almanac | Tab::Targets => SKY_SPEED_PRESETS[app.sky_speed_index].1,
             Tab::SolarSystem => ORRERY_SPEED_PRESETS[app.orrery_speed_index].1,
         };
         format!(" [{}]", label)
@@ -874,13 +876,15 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let line2 = match app.tab {
         Tab::Sky =>
-            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [+/-]mag [D]orion [f]toggle FoV [/]search [S/W/P/A]tab [Q]quit",
+            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [+/-]mag [D]orion [f]toggle FoV [/]search [S/W/P/A/B]tab [Q]quit",
         Tab::Weather =>
-            " [L]locations [R]weather [↑/↓]scroll [S/W/P/A]tab [Q]quit",
+            " [L]locations [R]weather [↑/↓]scroll [S/W/P/A/B]tab [Q]quit",
         Tab::SolarSystem =>
-            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [S/W/P/A]tab [Q]quit",
+            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [S/W/P/A/B]tab [Q]quit",
         Tab::Almanac =>
-            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [b]bodies [t]times [S/W/P/A]tab [Q]quit",
+            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [v]bodies [t]times [S/W/P/A/B]tab [Q]quit",
+        Tab::Targets =>
+            " [↑/↓]scroll  [+/-]mag  [S/W/P/A/B]tab  [Q]quit",
     };
 
     let text = vec![Line::from(line1), Line::from(line2)];
@@ -1445,4 +1449,102 @@ fn render_almanac_legend(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     let title = if app.almanac_show_times { " Times [t] " } else { " Legend [t] " };
     let para = Paragraph::new(text).block(Block::default().borders(Borders::ALL).title(title));
     f.render_widget(para, area);
+}
+
+fn score_stars(score: f64) -> &'static str {
+    match (score * 5.0) as u8 {
+        5 => "★★★★★",
+        4 => "★★★★☆",
+        3 => "★★★☆☆",
+        2 => "★★☆☆☆",
+        _ => "★☆☆☆☆",
+    }
+}
+
+fn score_color(score: f64) -> Color {
+    if score >= 0.7 { Color::Green } else if score >= 0.4 { Color::Yellow } else { Color::Red }
+}
+
+fn render_best_targets(f: &mut Frame, app: &App, area: Rect) {
+    let rows_area = Layout::vertical([
+        Constraint::Length(2),
+        Constraint::Min(0),
+    ]).split(area);
+
+    let bt = &app.best_targets;
+
+    // Header
+    let night_str = if let (Some(ns), Some(ne)) = (bt.night_start, bt.night_end) {
+        let fmt_dt = |dt: chrono::DateTime<chrono::Utc>| {
+            if let Some(tz) = app.timezone {
+                dt.with_timezone(&tz).format("%H:%M %Z").to_string()
+            } else {
+                dt.format("%H:%M UTC").to_string()
+            }
+        };
+        format!("Astronomical Night: {}–{}", fmt_dt(ns), fmt_dt(ne))
+    } else {
+        "No astronomical night — showing best of 24h".to_string()
+    };
+    let header_text = format!(" {}   mag ≤ {:.1}  [+/-]", night_str, app.max_mag);
+    let header_para = Paragraph::new(Line::from(Span::styled(
+        header_text,
+        Style::default().fg(Color::DarkGray),
+    )));
+    f.render_widget(header_para, rows_area[0]);
+
+    if bt.targets.is_empty() {
+        let para = Paragraph::new("No observable targets found tonight.")
+            .block(Block::default().borders(Borders::ALL).title(" Best Targets "));
+        f.render_widget(para, rows_area[1]);
+        return;
+    }
+
+    let header_row = Row::new(vec!["#", "Sym", "Object", "Type", "Mag", "Peak Alt", "Time", "Moon Sep", "Score"])
+        .style(Style::default().add_modifier(Modifier::BOLD));
+
+    let rows: Vec<Row> = bt.targets.iter().enumerate().map(|(i, t)| {
+        let sc = score_color(t.score);
+        let obj = if t.name.is_empty() {
+            t.catalog.to_string()
+        } else {
+            format!("{} {}", t.catalog, t.name)
+        };
+        let time_str = if let Some(tz) = app.timezone {
+            t.peak_time_utc.with_timezone(&tz).format("%H:%M").to_string()
+        } else {
+            t.peak_time_utc.format("%H:%M").to_string()
+        };
+        Row::new(vec![
+            ratatui::text::Text::from(Span::styled(format!("{}", i + 1), Style::default().fg(Color::DarkGray))),
+            ratatui::text::Text::from(Span::styled(t.symbol, Style::default().fg(sc))),
+            ratatui::text::Text::from(Span::styled(obj, Style::default().fg(sc))),
+            ratatui::text::Text::from(Span::styled(t.kind_label, Style::default().fg(Color::DarkGray))),
+            ratatui::text::Text::from(Span::styled(format!("{:.1}", t.mag), Style::default().fg(Color::DarkGray))),
+            ratatui::text::Text::from(Span::styled(format!("{:.1}°", t.peak_alt_deg), Style::default().fg(sc))),
+            ratatui::text::Text::from(Span::styled(time_str, Style::default().fg(Color::DarkGray))),
+            ratatui::text::Text::from(Span::styled(format!("{:.1}°", t.moon_sep_deg), Style::default().fg(Color::DarkGray))),
+            ratatui::text::Text::from(Span::styled(score_stars(t.score), Style::default().fg(sc))),
+        ])
+    }).collect();
+
+    let widths = [
+        Constraint::Length(3),
+        Constraint::Length(3),
+        Constraint::Min(22),
+        Constraint::Length(14),
+        Constraint::Length(5),
+        Constraint::Length(9),
+        Constraint::Length(6),
+        Constraint::Length(9),
+        Constraint::Length(11),
+    ];
+
+    let table = Table::new(rows, widths)
+        .header(header_row)
+        .block(Block::default().borders(Borders::ALL).title(" Best Targets "))
+        .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+
+    let mut state = TableState::default().with_selected(Some(app.best_targets_scroll));
+    f.render_stateful_widget(table, rows_area[1], &mut state);
 }

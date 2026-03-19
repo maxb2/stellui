@@ -453,6 +453,258 @@ pub fn compute_dsos(
         .collect()
 }
 
+pub struct BestTarget {
+    pub catalog: &'static str,
+    pub name: &'static str,
+    pub kind_label: &'static str,
+    pub symbol: &'static str,
+    pub mag: f64,
+    pub peak_alt_deg: f64,
+    pub peak_time_utc: DateTime<Utc>,
+    pub moon_sep_deg: f64,
+    pub score: f64,
+}
+
+#[derive(Default)]
+pub struct BestTargetsInfo {
+    pub targets: Vec<BestTarget>,
+    pub night_start: Option<DateTime<Utc>>,
+    pub night_end: Option<DateTime<Utc>>,
+}
+
+
+fn angular_sep_deg(alt1: f64, az1: f64, alt2: f64, az2: f64) -> f64 {
+    let (a1, a2) = (alt1.to_radians(), alt2.to_radians());
+    let cos_sep = a1.sin() * a2.sin() + a1.cos() * a2.cos() * (az1 - az2).to_radians().cos();
+    cos_sep.clamp(-1.0, 1.0).acos().to_degrees()
+}
+
+pub fn compute_best_targets(
+    lat: f64,
+    lon: f64,
+    height: f64,
+    datetime: DateTime<Utc>,
+    tz: Option<chrono_tz::Tz>,
+    max_mag: f64,
+) -> BestTargetsInfo {
+    const STEPS: usize = 48;
+    const STEP_MINS: i64 = 30;
+
+    const PLANET_BODIES: &[(&str, &str, i32)] = &[
+        ("Mercury", "☿", astro_body_t_BODY_MERCURY),
+        ("Venus",   "♀", astro_body_t_BODY_VENUS),
+        ("Mars",    "♂", astro_body_t_BODY_MARS),
+        ("Jupiter", "♃", astro_body_t_BODY_JUPITER),
+        ("Saturn",  "♄", astro_body_t_BODY_SATURN),
+        ("Uranus",  "⛢", astro_body_t_BODY_URANUS),
+        ("Neptune", "♆", astro_body_t_BODY_NEPTUNE),
+    ];
+
+    let observer = astro_observer_t { latitude: lat, longitude: lon, height };
+
+    // Window starts at local noon today
+    let noon_start = match tz {
+        Some(tz) => {
+            let local_now = datetime.with_timezone(&tz);
+            let noon_naive = local_now.date_naive().and_hms_opt(12, 0, 0).unwrap();
+            tz.from_local_datetime(&noon_naive).unwrap().to_utc()
+        }
+        None => {
+            let noon_naive = datetime.date_naive().and_hms_opt(12, 0, 0).unwrap();
+            noon_naive.and_utc()
+        }
+    };
+
+    // Compute sun altitude at each step
+    let step_times: Vec<DateTime<Utc>> = (0..STEPS)
+        .map(|i| noon_start + Duration::minutes(i as i64 * STEP_MINS))
+        .collect();
+
+    let sun_alts: Vec<f64> = step_times.iter().map(|&dt| {
+        let mut t = astro_time_from_datetime(dt);
+        unsafe {
+            let eq = Astronomy_Equator(
+                astro_body_t_BODY_SUN,
+                &mut t as *mut _,
+                observer,
+                astro_equator_date_t_EQUATOR_OF_DATE,
+                astro_aberration_t_ABERRATION,
+            );
+            if eq.status != astro_status_t_ASTRO_SUCCESS {
+                return -90.0;
+            }
+            let hor = Astronomy_Horizon(
+                &mut t as *mut _,
+                observer,
+                eq.ra,
+                eq.dec,
+                astro_refraction_t_REFRACTION_NORMAL,
+            );
+            hor.altitude
+        }
+    }).collect();
+
+    let mut night_indices: Vec<usize> = (0..STEPS)
+        .filter(|&i| sun_alts[i] < -18.0)
+        .collect();
+    let fallback = night_indices.is_empty();
+    if fallback {
+        night_indices = (0..STEPS).collect();
+    }
+
+    let night_start = if fallback {
+        None
+    } else {
+        Some(step_times[night_indices[0]])
+    };
+    let night_end = if fallback {
+        None
+    } else {
+        Some(step_times[*night_indices.last().unwrap()] + Duration::minutes(STEP_MINS))
+    };
+
+    // Helper: compute alt/az of a body using Equator+Horizon
+    let body_altaz = |body: i32, t: &mut astro_time_t| -> (f64, f64) {
+        unsafe {
+            let eq = Astronomy_Equator(
+                body,
+                t as *mut _,
+                observer,
+                astro_equator_date_t_EQUATOR_OF_DATE,
+                astro_aberration_t_ABERRATION,
+            );
+            if eq.status != astro_status_t_ASTRO_SUCCESS {
+                return (-90.0, 0.0);
+            }
+            let hor = Astronomy_Horizon(t as *mut _, observer, eq.ra, eq.dec, astro_refraction_t_REFRACTION_NORMAL);
+            (hor.altitude, hor.azimuth)
+        }
+    };
+
+    let mut targets: Vec<BestTarget> = Vec::new();
+
+    // DSOs
+    for dso in dso::MESSIER {
+        if dso.mag > max_mag {
+            continue;
+        }
+        let fake_star = catalog::Star { id: 0, ra: dso.ra, dec: dso.dec, mag: dso.mag };
+
+        let alts: Vec<(f64, f64)> = night_indices.iter().map(|&i| {
+            let mut t = astro_time_from_datetime(step_times[i]);
+            match star_stereo(&fake_star, &mut t, &observer, true, true) {
+                Ok(polar) => {
+                    let alt = 90.0 - 2.0 * (polar.rad / 2.0).atan().to_degrees();
+                    let az = polar.phi;
+                    (alt, az)
+                }
+                Err(_) => (-90.0, 0.0),
+            }
+        }).collect();
+
+        let peak_local = alts.iter().enumerate()
+            .max_by(|(_, a), (_, b)| a.0.partial_cmp(&b.0).unwrap())
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+
+        let (peak_alt, peak_az) = alts[peak_local];
+        if peak_alt < 10.0 {
+            continue;
+        }
+
+        let peak_step = night_indices[peak_local];
+        let peak_time_utc = step_times[peak_step];
+
+        let mut moon_t = astro_time_from_datetime(peak_time_utc);
+        let smp = SunMoonProjection::from_time_observer(&mut moon_t, &observer);
+        let moon_alt = smp.moon_hor.altitude;
+        let moon_az = smp.moon_hor.azimuth;
+        let moon_sep_deg = if moon_alt < 0.0 {
+            90.0
+        } else {
+            angular_sep_deg(peak_alt, peak_az, moon_alt, moon_az)
+        };
+
+        let alt_score = (peak_alt / 90.0).clamp(0.0, 1.0);
+        let moon_score = (moon_sep_deg / 90.0).clamp(0.0, 1.0);
+        let score = 0.6 * alt_score + 0.4 * moon_score;
+
+        targets.push(BestTarget {
+            catalog: dso.catalog,
+            name: dso.name,
+            kind_label: dso.kind.label(),
+            symbol: dso.kind.symbol(),
+            mag: dso.mag,
+            peak_alt_deg: peak_alt,
+            peak_time_utc,
+            moon_sep_deg,
+            score,
+        });
+    }
+
+    // Planets
+    for &(name, symbol, body) in PLANET_BODIES {
+        let alts: Vec<(f64, f64)> = night_indices.iter().map(|&i| {
+            let mut t = astro_time_from_datetime(step_times[i]);
+            body_altaz(body, &mut t)
+        }).collect();
+
+        let peak_local = alts.iter().enumerate()
+            .max_by(|(_, a), (_, b)| a.0.partial_cmp(&b.0).unwrap())
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+
+        let (peak_alt, peak_az) = alts[peak_local];
+        if peak_alt < 10.0 {
+            continue;
+        }
+
+        let peak_step = night_indices[peak_local];
+        let peak_time_utc = step_times[peak_step];
+
+        let mut moon_t = astro_time_from_datetime(peak_time_utc);
+        let smp = SunMoonProjection::from_time_observer(&mut moon_t, &observer);
+        let moon_alt = smp.moon_hor.altitude;
+        let moon_az = smp.moon_hor.azimuth;
+        let moon_sep_deg = if moon_alt < 0.0 {
+            90.0
+        } else {
+            angular_sep_deg(peak_alt, peak_az, moon_alt, moon_az)
+        };
+
+        // Planet magnitude at peak time
+        let mag = unsafe {
+            let t = astro_time_from_datetime(peak_time_utc);
+            let illum = Astronomy_Illumination(body, t);
+            if illum.status == astro_status_t_ASTRO_SUCCESS { illum.mag } else { 99.0 }
+        };
+
+        if mag > max_mag {
+            continue;
+        }
+
+        let alt_score = (peak_alt / 90.0).clamp(0.0, 1.0);
+        let moon_score = (moon_sep_deg / 90.0).clamp(0.0, 1.0);
+        let score = 0.6 * alt_score + 0.4 * moon_score;
+
+        targets.push(BestTarget {
+            catalog: name,
+            name: "",
+            kind_label: "Planet",
+            symbol,
+            mag,
+            peak_alt_deg: peak_alt,
+            peak_time_utc,
+            moon_sep_deg,
+            score,
+        });
+    }
+
+    targets.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+
+    BestTargetsInfo { targets, night_start, night_end }
+}
+
 pub fn compute_sun_moon(lat: f64, lon: f64, height: f64, datetime: DateTime<Utc>) -> SunMoonInfo {
     let observer = astro_observer_t {
         latitude: lat,

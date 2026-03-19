@@ -12,7 +12,7 @@ pub fn resolve_tz(lat: f64, lon: f64) -> Option<chrono_tz::Tz> {
     if name.is_empty() { None } else { name.parse().ok() }
 }
 
-use crate::sky::{self, AlmanacInfo, OrreryInfo, RenderedDso, RenderedPlanet, RenderedStar, SunMoonInfo};
+use crate::sky::{self, AlmanacInfo, BestTargetsInfo, OrreryInfo, RenderedDso, RenderedPlanet, RenderedStar, SunMoonInfo};
 use crate::weather::HourlyForecast;
 
 /// Sky tab: seconds → days. Default index 6 = 1x real-time.
@@ -50,6 +50,7 @@ pub enum Tab {
     Weather,
     SolarSystem,
     Almanac,
+    Targets,
 }
 
 pub enum InputMode {
@@ -122,6 +123,10 @@ pub struct App {
     pub selected_bodies: Vec<bool>,
     pub almanac_picker_sel: usize,
     pub almanac_show_times: bool,
+
+    pub best_targets: BestTargetsInfo,
+    pub best_targets_scroll: usize,
+    pub best_targets_valid: bool,
 
     pub forecasts: Option<Vec<HourlyForecast>>,
     pub weather_loading: bool,
@@ -198,6 +203,9 @@ impl App {
                 moon_alt: 0.0,
                 moon_az: 0.0,
             },
+            best_targets: BestTargetsInfo::default(),
+            best_targets_scroll: 0,
+            best_targets_valid: false,
             forecasts: None,
             weather_loading: false,
             weather_error: None,
@@ -229,6 +237,7 @@ impl App {
         self.height = loc.height;
         self.timezone = timezone_override.or_else(|| resolve_tz(self.lat, self.lon));
         self.location_index = index;
+        self.best_targets_valid = false;
         self.recompute();
     }
 
@@ -250,6 +259,10 @@ impl App {
             while self.selected_bodies.len() < self.almanac.tracks.len() {
                 self.selected_bodies.push(true);
             }
+        }
+        if matches!(self.tab, Tab::Targets) && !self.best_targets_valid {
+            self.best_targets = sky::compute_best_targets(self.lat, self.lon, self.height, self.datetime, self.timezone, self.max_mag);
+            self.best_targets_valid = true;
         }
     }
 }

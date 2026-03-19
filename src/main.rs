@@ -129,7 +129,7 @@ fn run(
             app.recompute();
         } else if !app.time_paused {
             let speed = match app.tab {
-                Tab::Sky | Tab::Weather | Tab::Almanac => SKY_SPEED_PRESETS[app.sky_speed_index].0,
+                Tab::Sky | Tab::Weather | Tab::Almanac | Tab::Targets => SKY_SPEED_PRESETS[app.sky_speed_index].0,
                 Tab::SolarSystem => ORRERY_SPEED_PRESETS[app.orrery_speed_index].0,
             };
             let sim_nanos = (speed as f64 * elapsed_wall.as_secs_f64() * 1_000_000_000.0) as i64;
@@ -166,9 +166,13 @@ fn run(
                             app.selected_bodies.push(true);
                         }
                     }
-                    KeyCode::Char('b') | KeyCode::Char('B') if matches!(app.tab, Tab::Almanac) => {
+                    KeyCode::Char('v') | KeyCode::Char('V') if matches!(app.tab, Tab::Almanac) => {
                         app.input_mode = InputMode::AlmanacBodyPicker;
                         app.almanac_picker_sel = 0;
+                    }
+                    KeyCode::Char('b') | KeyCode::Char('B') => {
+                        app.tab = Tab::Targets;
+                        app.recompute();
                     }
                     KeyCode::Char('f') | KeyCode::Char('F') if matches!(app.tab, Tab::Sky) => {
                         if app.fov_active {
@@ -232,11 +236,12 @@ fn run(
                         app.time_paused = false;
                         app.datetime = Utc::now();
                         app.last_tick = Instant::now();
+                        app.best_targets_valid = false;
                         app.recompute();
                     }
                     KeyCode::Char(',') => {
                         match app.tab {
-                            Tab::Sky | Tab::Weather | Tab::Almanac => {
+                            Tab::Sky | Tab::Weather | Tab::Almanac | Tab::Targets => {
                                 if app.sky_speed_index > 0 { app.sky_speed_index -= 1; }
                             }
                             Tab::SolarSystem => {
@@ -248,7 +253,7 @@ fn run(
                     }
                     KeyCode::Char('.') => {
                         match app.tab {
-                            Tab::Sky | Tab::Weather | Tab::Almanac => {
+                            Tab::Sky | Tab::Weather | Tab::Almanac | Tab::Targets => {
                                 if app.sky_speed_index + 1 < SKY_SPEED_PRESETS.len() { app.sky_speed_index += 1; }
                             }
                             Tab::SolarSystem => {
@@ -260,10 +265,12 @@ fn run(
                     }
                     KeyCode::Char('+') | KeyCode::Char('=') => {
                         app.max_mag = (app.max_mag + 0.5).min(8.0);
+                        app.best_targets_valid = false;
                         app.recompute();
                     }
                     KeyCode::Char('-') => {
                         app.max_mag = (app.max_mag - 0.5).max(0.0);
+                        app.best_targets_valid = false;
                         app.recompute();
                     }
                     KeyCode::Char('d') | KeyCode::Char('D') => {
@@ -290,6 +297,8 @@ fn run(
                         if app.fov_active && matches!(app.tab, Tab::Sky) {
                             let step = (app.fov_deg / 6.0).max(0.5);
                             app.fov_alt = (app.fov_alt + step).min(90.0);
+                        } else if matches!(app.tab, Tab::Targets) {
+                            app.best_targets_scroll = app.best_targets_scroll.saturating_sub(1);
                         } else {
                             app.weather_scroll = app.weather_scroll.saturating_sub(1);
                         }
@@ -298,6 +307,9 @@ fn run(
                         if app.fov_active && matches!(app.tab, Tab::Sky) {
                             let step = (app.fov_deg / 6.0).max(0.5);
                             app.fov_alt = (app.fov_alt - step).max(-90.0);
+                        } else if matches!(app.tab, Tab::Targets) {
+                            let max = app.best_targets.targets.len().saturating_sub(1);
+                            app.best_targets_scroll = app.best_targets_scroll.saturating_add(1).min(max);
                         } else {
                             let max = app
                                 .forecasts
@@ -710,6 +722,7 @@ fn apply_input(app: &mut App) {
                 };
                 app.live_mode = false;
                 app.time_paused = true;
+                app.best_targets_valid = false;
             }
         }
         InputMode::EditingTimezone => {

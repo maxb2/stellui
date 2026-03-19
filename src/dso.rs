@@ -22,6 +22,18 @@ impl DsoKind {
             Self::SupernovaRemnant | Self::Other => "✦",
         }
     }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Galaxy          => "Galaxy",
+            Self::OpenCluster     => "Open Cluster",
+            Self::GlobularCluster => "Glob. Cluster",
+            Self::Nebula          => "Nebula",
+            Self::PlanetaryNebula => "Planet. Neb.",
+            Self::SupernovaRemnant => "SNR",
+            Self::Other           => "Other",
+        }
+    }
 }
 
 /// A single deep-sky object entry.

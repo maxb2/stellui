@@ -298,6 +298,9 @@ fn run(
                         app.calc_draft = None;
                         app.calc_row = 0;
                     }
+                    KeyCode::Char('?') => {
+                        app.input_mode = InputMode::KeyboardHelp;
+                    }
                     KeyCode::Up => {
                         if app.fov_active && matches!(app.tab, Tab::Sky) {
                             let step = (app.fov_deg / 6.0).max(0.5);
@@ -686,6 +689,12 @@ fn run(
                         }
                     }
                 }
+                InputMode::KeyboardHelp => match key.code {
+                    KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q') => {
+                        app.input_mode = InputMode::Normal;
+                    }
+                    _ => {}
+                },
                 InputMode::EditingDatetime | InputMode::EditingTimezone => {
                     match key.code {
                         KeyCode::Esc => {
@@ -740,6 +749,6 @@ fn apply_input(app: &mut App) {
                 app.timezone = Some(tz);
             }
         }
-        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation | InputMode::AlmanacBodyPicker | InputMode::FovInput | InputMode::ObjectSearch | InputMode::EyepieceCalc => {}
+        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation | InputMode::AlmanacBodyPicker | InputMode::FovInput | InputMode::ObjectSearch | InputMode::EyepieceCalc | InputMode::KeyboardHelp => {}
     }
 }

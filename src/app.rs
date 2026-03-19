@@ -64,6 +64,7 @@ pub enum InputMode {
     FovInput,
     ObjectSearch,
     EyepieceCalc,
+    KeyboardHelp,
 }
 
 pub struct NewLocationDraft {

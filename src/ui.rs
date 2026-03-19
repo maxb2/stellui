@@ -113,6 +113,7 @@ pub fn render(f: &mut Frame, app: &App) {
         InputMode::FovInput => render_fov_input(f, app),
         InputMode::ObjectSearch => render_object_search(f, app),
         InputMode::EyepieceCalc => render_eyepiece_calc(f, app),
+        InputMode::KeyboardHelp => render_help(f),
         _ => {}
     }
 }
@@ -884,7 +885,7 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let loc_name = app.locations.get(app.location_index).map(|l| l.name.as_str()).unwrap_or("");
 
     let editing_hint = match app.input_mode {
-        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation | InputMode::AlmanacBodyPicker | InputMode::FovInput | InputMode::ObjectSearch | InputMode::EyepieceCalc => String::new(),
+        InputMode::Normal | InputMode::LocationPicker | InputMode::AddingLocation | InputMode::AlmanacBodyPicker | InputMode::FovInput | InputMode::ObjectSearch | InputMode::EyepieceCalc | InputMode::KeyboardHelp => String::new(),
         InputMode::EditingDatetime => format!(" Editing time (local): {}_", app.input_buf),
         InputMode::EditingTimezone => format!(" Editing timezone: {}_", app.input_buf),
     };
@@ -900,17 +901,17 @@ fn render_status(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let line2 = match app.tab {
         Tab::Sky =>
-            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [+/-]mag [D]orion [f]toggle FoV [/]search [S/W/P/A/B]tab [Q]quit",
+            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [+/-]mag [D]orion [f]toggle FoV [/]search [S/W/P/A/B]tab [Q]quit  [?]help",
         Tab::Weather =>
-            " [L]locations [R]weather [↑/↓]scroll [S/W/P/A/B]tab [Q]quit",
+            " [L]locations [R]weather [↑/↓]scroll [S/W/P/A/B]tab [Q]quit  [?]help",
         Tab::SolarSystem =>
-            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [S/W/P/A/B]tab [Q]quit",
+            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [S/W/P/A/B]tab [Q]quit  [?]help",
         Tab::Almanac =>
-            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [v]bodies [t]times [S/W/P/A/B]tab [Q]quit",
+            " [L]locations [T]time [Z]tz [N]now [Space]pause [,/.]speed [v]bodies [t]times [S/W/P/A/B]tab [Q]quit  [?]help",
         Tab::Targets =>
-            " [↑/↓]scroll  [+/-]mag  [S/W/P/A/B/C]tab  [Q]quit",
+            " [↑/↓]scroll  [+/-]mag  [S/W/P/A/B/C]tab  [Q]quit  [?]help",
         Tab::Conjunctions =>
-            " [↑/↓]scroll  [C]conjunctions  [S/W/P/A/B]tab  [N]now  [Q]quit",
+            " [↑/↓]scroll  [C]conjunctions  [S/W/P/A/B]tab  [N]now  [Q]quit  [?]help",
     };
 
     let text = vec![Line::from(line1), Line::from(line2)];
@@ -1265,6 +1266,72 @@ fn render_eyepiece_calc(f: &mut Frame, app: &App) {
 
     let para = Paragraph::new(lines);
     f.render_widget(para, inner);
+}
+
+fn render_help(f: &mut Frame) {
+    let area = centered_popup(f, 72, 26);
+    f.render_widget(Clear, area);
+
+    let block = Block::default().borders(Borders::ALL).title(" Keyboard Shortcuts ");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    // Split inner area into two columns
+    let cols = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(inner);
+
+    let header = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    let key_style = Style::default();
+    let desc_style = Style::default().fg(Color::DarkGray);
+
+    fn kv<'a>(key: &'a str, desc: &'a str, key_style: Style, desc_style: Style) -> Line<'a> {
+        Line::from(vec![
+            Span::styled(format!(" {:<18}", key), key_style),
+            Span::styled(desc.to_string(), desc_style),
+        ])
+    }
+
+    let left_lines: Vec<Line> = vec![
+        Line::from(Span::styled(" Navigation", header)),
+        kv("s  Sky view", "w  Weather", key_style, desc_style),
+        kv("p  Orrery", "a  Almanac", key_style, desc_style),
+        kv("b  Best Targets", "c  Conjunctions", key_style, desc_style),
+        Line::from(""),
+        Line::from(Span::styled(" Time", header)),
+        kv("Space  Pause/Play", "n  Go to now", key_style, desc_style),
+        kv(",  Speed slower", ".  Speed faster", key_style, desc_style),
+        kv("t  Edit time", "z  Edit timezone", key_style, desc_style),
+        Line::from(""),
+        Line::from(Span::styled(" Observer", header)),
+        kv("l  Location picker", "", key_style, desc_style),
+        kv("+  Mag limit up", "-  Mag limit down", key_style, desc_style),
+        Line::from(""),
+        Line::from(Span::styled(" Other", header)),
+        kv("r  Refresh weather", "q  Quit", key_style, desc_style),
+        kv("?  This help", "", key_style, desc_style),
+    ];
+
+    let right_lines: Vec<Line> = vec![
+        Line::from(Span::styled(" Sky Tab", header)),
+        kv("/  Object search", "o  Toggle DSOs", key_style, desc_style),
+        kv("f  Toggle FoV mode", "", key_style, desc_style),
+        kv("[  FoV zoom out", "]  FoV zoom in", key_style, desc_style),
+        kv("↑↓←→  Pan FoV", "", key_style, desc_style),
+        Line::from(""),
+        Line::from(Span::styled(" Almanac Tab", header)),
+        kv("v  Body picker", "t  Toggle times", key_style, desc_style),
+        Line::from(""),
+        Line::from(Span::styled(" Eyepiece Calculator", header)),
+        kv("e  Open calculator", "", key_style, desc_style),
+        kv("↑↓  Select row", "←→  Cycle item", key_style, desc_style),
+        kv("n  New", "d  Delete", key_style, desc_style),
+        kv("Enter  Apply FoV", "", key_style, desc_style),
+        Line::from(""),
+        Line::from(""),
+        Line::from(Span::styled(" [Esc] or [?] to close", desc_style)),
+    ];
+
+    f.render_widget(Paragraph::new(left_lines), cols[0]);
+    f.render_widget(Paragraph::new(right_lines), cols[1]);
 }
 
 fn centered_popup(f: &Frame, width_pct: u16, height: u16) -> Rect {
